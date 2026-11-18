@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Review</title>
+  <link rel="stylesheet" href="/static/style.css?v=5">
+  <script src="/static/videos.js?v=4" defer></script>
+</head>
+<body>
+  <!-- ---------------------------------------------------- -->
+  <!-- UPLOAD OR RECORD A CLIP                               -->
+  <!-- ---------------------------------------------------- -->
+  <header class="topbar">
+    <div class="presence"><strong>Review</strong></div>
+    <div class="header-actions">
+      <button id="export-button" class="quiet">Export reviewed</button>
+      <button id="upload-button">Upload video</button>
+      <span id="record-controls" class="record-controls"></span>
+      <span id="user-badge" class="user-badge"></span>
+    </div>
+  </header>
+  <main class="workspace">
+    <!-- ---------------------------------------------------- -->
+    <!-- CLIPS, NEWEST FIRST                                  -->
+    <!-- ---------------------------------------------------- -->
+    <aside class="queue-panel"><div class="panel-heading"><h2>Clips</h2></div><div id="video-list" class="image-list"></div></aside>
+    <!-- ---------------------------------------------------- -->
+    <!-- PLAYER WITH TRACK BOXES AND INSIDE/OUTSIDE ZONES     -->
+    <!-- ---------------------------------------------------- -->
+    <section class="editor-panel">
+      <div class="editor-heading"><div><h2 id="video-title">Select a clip</h2><p id="video-meta"></p></div><span id="video-state" class="save-state"></span></div>
+      <div id="video-warning" class="warning" hidden></div>
+      <div class="toolbar">
+        <div class="tool-group">
+          <button id="zone-inside" class="tool" title="Drag a rectangle over the inside of the fridge">Draw inside</button>
+          <button id="zone-outside" class="tool" title="Drag a rectangle over the area outside the fridge">Draw outside</button>
+          <button id="zone-clear">Clear zones</button>
+          <button id="zone-save" class="primary">Save zones &amp; re-check</button>
+        </div>
+        <div class="tool-group"><label class="empty-check"><input id="show-all" type="checkbox">Show all tracks</label><button id="rerun-button">Run models again</button></div>
+      </div>
+      <div class="video-stage" id="video-stage">
+        <div id="video-empty" class="empty-editor">Upload or record a clip.</div>
+        <div id="video-frame" class="video-frame" hidden>
+          <video id="player" controls playsinline muted></video>
+          <canvas id="overlay" aria-label="Tracks and zones"></canvas>
+        </div>
+      </div>
+      <div class="editor-footer"><span class="muted">Green = inside, orange = outside. Movement is counted only when the same track is seen stably in both zones.</span></div>
+    </section>
+    <!-- ---------------------------------------------------- -->
+    <!-- MOVEMENTS AND TRACK CORRECTIONS                      -->
+    <!-- ---------------------------------------------------- -->
+    <aside class="inspector">
+      <div class="panel-heading"><h2>Movements</h2><span id="movement-count" class="count-pill">0</span></div>
+      <div id="movement-list" class="movement-list"><p class="muted">No clip selected.</p></div>
+      <div class="panel-heading"><h2>Tracks</h2><span id="track-count" class="count-pill">0</span></div>
+      <div id="track-list" class="track-list"></div>
+      <label class="field-label" for="notes">Notes</label><textarea id="notes" rows="2" maxlength="4000"></textarea>
+      <label class="empty-check"><input id="reviewed" type="checkbox">Reviewed</label>
+      <div class="review-actions"><button id="save-review" class="primary">Save review</button></div>
+    </aside>
+  </main>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <dialog id="join-dialog"><form id="join-form"><label for="editor-name">Your name</label><input id="editor-name" required maxlength="40" autocomplete="given-name"><button class="primary" type="submit">Open</button></form></dialog>
+  <dialog id="upload-dialog"><form id="upload-form"><h2>Upload a video</h2>
+    <label for="upload-camera">Camera</label><select id="upload-camera"></select>
+    <label for="upload-event">Door event ID (optional)</label><input id="upload-event" maxlength="120">
+    <label for="upload-file">Video</label><input id="upload-file" type="file" accept="video/*,.h264,.mkv" required>
+    <div class="dialog-actions"><button id="cancel-upload" type="button">Cancel</button><button class="primary" type="submit">Upload</button></div>
+    <p id="upload-result" role="status"></p></form></dialog>
+</body>
+</html>

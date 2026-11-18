@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+build/
+.cache/
+*.log
+vit/*
+!vit/.gitkeep
+yolo/*
+!yolo/.gitkeep
+data/*
+!data/acquisition/
+data/acquisition/*
+!data/acquisition/.gitkeep
+runs/

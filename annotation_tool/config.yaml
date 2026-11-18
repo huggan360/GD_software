@@ -1,0 +1,139 @@
+#------------------------------------------------------------
+# SERVER, STORAGE AND THE SHARED VIDEO PIPELINE
+#------------------------------------------------------------
+# Paths are relative to this file. Everyone uses ONE server.
+host: 127.0.0.1  # Use --host 0.0.0.0 on the Pi to open it from a laptop.
+port: 9000
+storage: ../data/acquisition  # Reviewer names and categories; clips are in videos/ here.
+# Models, zones, cameras and upload limits: the same file production uses.
+video_config: ../configs/video.yaml
+# Labels for review and training exports. Adding a label does not train ViT.
+# Keep the installed dataset's category names so its images can be reused.
+categories:
+  # Dairy, eggs and plant-based alternatives.
+  - milk
+  - butter
+  - cheese
+  - cream-cheese
+  - cottage-cheese
+  - cream
+  - sour-cream
+  - sour-milk
+  - yoghurt
+  - egg
+  - margarine
+  - oat-milk
+  - soy-milk
+  - almond-milk
+  - coconut-milk
+  - oatghurt
+  - soyghurt
+  # Fruit.
+  - apple
+  - banana
+  - orange
+  - lemon
+  - lime
+  - red-grapefruit
+  - satsumas
+  - pear
+  - peach
+  - nectarine
+  - plum
+  - kiwi
+  - mango
+  - melon
+  - watermelon
+  - pineapple
+  - papaya
+  - passion-fruit
+  - pomegranate
+  - grape
+  - strawberry
+  - blueberry
+  - raspberry
+  - cherry
+  - avocado
+  # Vegetables and herbs.
+  - tomato
+  - cucumber
+  - pepper
+  - carrots
+  - potato
+  - sweet-potato
+  - onion
+  - leek
+  - garlic
+  - ginger
+  - cabbage
+  - red-beet
+  - asparagus
+  - aubergine
+  - zucchini
+  - mushroom
+  - broccoli
+  - cauliflower
+  - lettuce
+  - spinach
+  - celery
+  - radish
+  - corn
+  - peas
+  - green-beans
+  - chilli
+  - basil
+  - parsley
+  # Meat, fish and vegetarian proteins.
+  - chicken
+  - beef
+  - pork
+  - minced-meat
+  - ham
+  - bacon
+  - sausage
+  - salami
+  - salmon
+  - tuna
+  - white-fish
+  - shrimp
+  - tofu
+  - tempeh
+  - hummus
+  # Sauces, spreads and preserved foods.
+  - ketchup
+  - salsa
+  - mustard
+  - mayonnaise
+  - pesto
+  - salad-dressing
+  - soy-sauce
+  - hot-sauce
+  - tomato-sauce
+  - jam
+  - honey
+  - peanut-butter
+  - pickles
+  - olives
+  - beans
+  - chickpeas
+  # Bread, staples, drinks and prepared foods.
+  - bread
+  - bread-roll
+  - tortilla
+  - crispbread
+  - pasta
+  - rice
+  - oats
+  - cereal
+  - juice
+  - water
+  - sparkling-water
+  - soft-drink
+  - beer
+  - wine
+  - soup
+  - salad
+  - sandwich
+  - pizza
+  - ready-meal
+  - leftovers
