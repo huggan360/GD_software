@@ -1,6 +1,7 @@
 #include "classifier.hpp"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
 
@@ -25,6 +26,7 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
     double fps = video.get(cv::CAP_PROP_FPS);
     int width = int(video.get(cv::CAP_PROP_FRAME_WIDTH)), height = int(video.get(cv::CAP_PROP_FRAME_HEIGHT));
     int expected_frames = int(video.get(cv::CAP_PROP_FRAME_COUNT));
+    std::cout << "Öppnat klippet: " << expected_frames << " bildrutor, " << fps << " bilder per sekund. Laddar YOLO." << std::endl;
 
     double requested_fps = tracking["sample_fps"].as<double>(0);
 
@@ -92,8 +94,11 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
             if (matches[i] >= 0) yolo_scores = product_boxes[matches[i]].class_scores;
             keep_product_photo(product, rgb, box, tracked->getScore(), time, photo_count, yolo_scores);
         }
+        // Skriver hur långt vi kommit ungefär var tionde sekund av videon.
+        if (current_frame % std::max(1, int(fps * 10)) < step) std::cout << "YOLO och spårning: " << frame_number << " av " << expected_frames << " bildrutor." << std::endl;
     }
 
+    std::cout << "YOLO och spårning är klara för " << frame_number << " bildrutor." << std::endl;
     Json tracks = Json::array(), movements = Json::array(), warnings = Json::array();
 
 
@@ -126,6 +131,7 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
                     if (class_order.empty() && detector.class_names.size() > 1) warnings.push_back("YOLO och ViT har olika listor så vi använder vit");
                 }
 
+                std::cout << "ViT klassificerar objekt " << item.first << " med " << product.photos.size() << " bilder." << std::endl;
                 classify_product_vit(product, *vit, class_order, settings.vit_weight, config["classifier"]["confidence"].as<float>()); //--------------HÄR KÖR VI VIT-----------
 
             }

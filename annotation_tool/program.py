@@ -124,7 +124,8 @@ class ClassifierProgram:
         command = [str(ROOT / "build/gd_classifier"), "--production", "--record-id", capture_id, "--request", str(request), "--output", str(output), "--config", self.config["config_path"], "--models-dir", self.config["models_directory"]]
         try:
             with (directory / "inference.log").open("w") as log:
-                subprocess.run(command, stdout=log, stderr=log, check=True, timeout=600)
+                # Alla bildrutor ska analyseras. Långa klipp på Pi:n får därför ta den tid de behöver.
+                subprocess.run(command, stdout=log, stderr=log, check=True)
             result = json.loads(output.read_text())
             progress(90, "Förbereder visningen")
             self.prepare_review(source, directory, result)
