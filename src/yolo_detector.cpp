@@ -76,20 +76,37 @@ ProductDetector::ProductDetector(const AppSettings& settings) {
 #ifdef GD_HAILO
         hailo_model = std::make_unique<HailoDetector>(settings);
         class_names = hailo_model->class_names;
+        queue_size = hailo_model->queue_size;
 #endif
 
     }
 }
 
-// Båda modellerna lämnar tillbaka samma sorts rutor till resten av programmet.
-std::vector<Detection> ProductDetector::detect(const cv::Mat& image) {
-    if (cpu_model) return cpu_model->detect(image, minimum_score);
-
+// CPU-modellen räknar direkt. Hailo kan arbeta vidare medan vi förbereder nästa bild.
+void ProductDetector::send(const cv::Mat& image) {
+    if (cpu_model) {
+        auto start = Clock::now();
+        cpu_results.push_back(cpu_model->detect(image, minimum_score));
+        timings.add("yolo_total", start);
+        return;
+    }
 #ifdef GD_HAILO
-    return hailo_model->detect(image);
+    hailo_model->send(image);
 #endif
+}
 
-
+// Båda modellerna lämnar tillbaka samma sorts rutor och behåller bildordningen.
+std::vector<Detection> ProductDetector::receive() {
+    if (cpu_model) {
+        std::vector<Detection> result = std::move(cpu_results.front());
+        cpu_results.pop_front();
+        return result;
+    }
+#ifdef GD_HAILO
+    return hailo_model->receive();
+#else
+    throw std::runtime_error("Programmet är byggt utan Hailo.");
+#endif
 }
 
 // Kör lokal YOLO och översätter rutorna tillbaka till den inskickade bildens storlek.

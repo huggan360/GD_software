@@ -6,8 +6,8 @@
 Timings timings;
 
 // Räknar millisekunder och uppdaterar stegets summa, medelvärde och yttervärden.
-double Timings::add(const std::string& name, Clock::time_point start) {
-    double milliseconds = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+double Timings::add(const std::string& name, Clock::time_point start, Clock::time_point finish) {
+    double milliseconds = std::chrono::duration<double, std::milli>(finish - start).count();
     TimeReading& reading = readings[name];
     if (reading.calls == 0) reading.first = reading.minimum = reading.maximum = milliseconds;
     ++reading.calls;
@@ -32,9 +32,9 @@ Json Timings::results() const {
     return result;
 }
 
-// Alla tider är väggtid. Exempelvis yolo_total innehåller YOLO:s tre delsteg.
+// Alla tider är väggtid. När CPU och Hailo arbetar samtidigt överlappar deras tider.
 void Timings::print() const {
-    std::cout << "Tidsmätning i ms: totalsteg innehåller sina delsteg och ska inte summeras med dem.\n" << std::fixed << std::setprecision(3);
+    std::cout << "Tidsmätning i ms: överlappande steg kan inte summeras. Latens innehåller köväntan; frames_wall är bildrutornas verkliga sammanlagda tid.\n" << std::fixed << std::setprecision(3);
     for (const auto& [name, reading] : readings) std::cout << name << ": calls=" << reading.calls << ", total_ms=" << reading.total << ", average_ms=" << reading.total / reading.calls << ", minimum_ms=" << reading.minimum << ", maximum_ms=" << reading.maximum << ", first_ms=" << reading.first << ", last_ms=" << reading.last << '\n';
     std::cout.flush();
 }

@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 #include <chrono>
+#include <deque>
+#include <future>
 #include <filesystem>
 #include <map>
 #include <stdexcept>
@@ -30,7 +32,7 @@ struct TimeReading {
 class Timings {
 public:
     // Sparar tiden sedan start och lämnar tillbaka antalet millisekunder.
-    double add(const std::string& name, Clock::time_point start);
+    double add(const std::string& name, Clock::time_point start, Clock::time_point finish = Clock::now());
     // Ger medeltiden för ett anrop till steget.
     double average(const std::string& name) const;
     // Gör tiderna till en del av programmets vanliga JSON-resultat.
@@ -98,26 +100,52 @@ private:
 };
 
 #ifdef GD_HAILO
+// Callbacken lämnar bara status och sluttid. Den ändrar aldrig spårning eller tidsstatistik.
+struct HailoResult {
+    hailo_status status;
+    Clock::time_point finished;
+};
+
+// En fast bildplats äger sina buffertar tills Hailo är färdig med bilden.
+struct HailoRequest {
+    float scale = 1;
+    int left = 0, top = 0, image_width = 0, image_height = 0;
+    Clock::time_point submitted;
+    // Äger den sidjusterade bildbufferten som Hailo läser.
+    std::shared_ptr<uint8_t> input_buffer;
+    // Äger modellens svarsbuffertar, en per utgång.
+    std::map<std::string, std::shared_ptr<uint8_t>> output_buffers;
+    std::vector<hailort::DmaMappedBuffer> mappings;
+    // Äger kopplingen mellan modellens ingångar, utgångar och dessa buffertar.
+    std::unique_ptr<hailort::ConfiguredInferModel::Bindings> bindings;
+    std::future<HailoResult> completion;
+    // Jobbet ligger sist så att det avslutas innan buffertarna frigörs.
+    hailort::AsyncInferJob job;
+};
+
 // Här finns de Hailo-specifika delarna. Resten av programmet arbetar med vanliga produktrutor.
 class HailoDetector {
 public:
     // Öppnar acceleratorn och läser den kompilerade YOLO-modellen.
     HailoDetector(const AppSettings& settings);
-    // Skickar en RGB-bild till Hailo och läser tillbaka produktrutorna.
-    std::vector<Detection> detect(const cv::Mat& image);
+    // Avslutar även väntande jobb innan bildbuffertarna frigörs.
+    ~HailoDetector();
+    // Skickar nästa bild utan att vänta på modellkörningen.
+    void send(const cv::Mat& image);
+    // Väntar på den äldsta bilden och översätter dess produktrutor.
+    std::vector<Detection> receive();
     std::vector<std::string> class_names;
+    size_t queue_size = 1;
 private:
-    hailort::Hef model;
     // Dessa smarta pekare äger Hailos resurser och frigör dem när klippet är klart.
     std::unique_ptr<hailort::VDevice> device;
-    // Hailo delar nätverksgruppen mellan sina interna delar.
-    std::shared_ptr<hailort::ConfiguredNetworkGroup> network;
-    // Äger aktiveringen som håller nätverket igång.
-    std::unique_ptr<hailort::ActivatedNetworkGroup> activation;
-    // Äger in- och utflödena för bilddata.
-    std::unique_ptr<hailort::InferVStreams> streams;
+    // Delat ägande av den laddade HEF-modellen.
+    std::shared_ptr<hailort::InferModel> model;
+    hailort::ConfiguredInferModel network;
+    // Varje pekare äger en bildplats. Platserna återanvänds i turordning.
+    std::vector<std::unique_ptr<HailoRequest>> requests;
+    size_t next_send = 0, next_receive = 0, pending = 0;
     std::vector<hailo_vstream_info_t> outputs;
-    std::map<std::string, std::vector<float>> output_values;
     std::vector<std::string> class_outputs;
     std::string input_name;
     int width = 640, height = 640;
@@ -130,11 +158,15 @@ class ProductDetector {
 public:
     // Laddar den detektor som valts i video.yaml.
     ProductDetector(const AppSettings& settings);
-    // Hittar objekt i den del av bilden som ska analyseras.
-    std::vector<Detection> detect(const cv::Mat& image);
+    // Lämnar nästa bild till den valda YOLO-modellen.
+    void send(const cv::Mat& image);
+    // Hämtar nästa resultat i samma ordning som bilderna skickades.
+    std::vector<Detection> receive();
     std::vector<std::string> class_names;
+    size_t queue_size = 1;
 private:
     float minimum_score;
+    std::deque<std::vector<Detection>> cpu_results;
     // Äger CPU-modellen när backend är torch; annars är pekaren tom.
     std::unique_ptr<ImageModel> cpu_model;
 #ifdef GD_HAILO

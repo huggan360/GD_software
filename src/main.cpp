@@ -118,7 +118,7 @@ int main(int count, char** arguments) {
         timings.add("pipeline_total", start);
         // JSON-delen innehåller tiderna fram till sparandet. Skrivtid och hela programtiden finns i loggen.
         result["timings_ms"] = timings.results();
-        result["timing_note"] = "Väggtid i ms. Totalsteg innehåller sina delsteg. JSON-skrivning och hela programtiden redovisas i loggen.";
+        result["timing_note"] = "Väggtid i ms. Överlappande steg kan inte summeras. yolo_latency och frame_latency innehåller köväntan. Jämför hastighet med performance.average_frame_ms och processed_fps. JSON-skrivning och hela programtiden finns i loggen.";
         write_json(options.result_file, result);
         timings.add("program_total", program_start);
         timings.print();
