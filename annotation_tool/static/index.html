@@ -4,19 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Review</title>
-  <link rel="stylesheet" href="/static/style.css?v=5">
-  <script src="/static/videos.js?v=4" defer></script>
+  <link rel="stylesheet" href="/static/style.css?v=7">
+  <script src="/static/videos.js?v=6" defer></script>
 </head>
 <body>
   <!-- ---------------------------------------------------- -->
-  <!-- UPLOAD OR RECORD A CLIP                               -->
+  <!-- UPLOAD OR READ A CLIP FROM EDGE                               -->
   <!-- ---------------------------------------------------- -->
   <header class="topbar">
     <div class="presence"><strong>Review</strong></div>
     <div class="header-actions">
       <button id="export-button" class="quiet">Export reviewed</button>
       <button id="upload-button">Upload video</button>
-      <span id="record-controls" class="record-controls"></span>
+      <button id="edge-import-button" disabled>Läs från edge</button>
       <span id="user-badge" class="user-badge"></span>
     </div>
   </header>
@@ -40,11 +40,12 @@
         </div>
         <div class="tool-group"><label class="empty-check"><input id="show-all" type="checkbox">Show all tracks</label><button id="rerun-button">Run models again</button></div>
       </div>
+      <p id="ignored-area-info" class="ignored-area-note">Högra 300 px hoppas alltid över av YOLO. Gränsen är fast.</p>
       <div class="video-stage" id="video-stage">
-        <div id="video-empty" class="empty-editor">Upload or record a clip.</div>
+        <div id="video-empty" class="empty-editor">Upload a clip or read one from edge.</div>
         <div id="video-frame" class="video-frame" hidden>
           <video id="player" controls playsinline muted></video>
-          <canvas id="overlay" aria-label="Tracks and zones"></canvas>
+          <canvas id="overlay" aria-label="Spår, zoner och fast undantaget område till höger"></canvas>
         </div>
       </div>
       <div class="editor-footer"><span class="muted">Green = inside, orange = outside. Movement is counted only when the same track is seen stably in both zones.</span></div>

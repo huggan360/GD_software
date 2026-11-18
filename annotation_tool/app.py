@@ -28,7 +28,7 @@ class CategoryRequest(BaseModel):
 # Create the review application
 # ---------------------
 def create_app(settings):
-    """Build the server: clips go through the same video pipeline as production."""
+    """Startar det fristående utvecklingsverktyget för klipp och klassificeringar."""
     store = Store(settings["storage"], settings["categories"])
     static = Path(__file__).parent / "static"
     library = None

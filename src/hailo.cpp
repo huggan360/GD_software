@@ -1,109 +1,115 @@
 #include "classifier.hpp"
-#include <hailo/hailort.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <fstream>
-#include <map>
-#include <set>
 #include <thread>
 
 using namespace hailort;
 
-// Keep Hailo errors visible instead of falling back to a slow CPU model.
-template<class T> T checked(Expected<T>&& value) {
-    if (!value) throw std::runtime_error("HailoRT error " + std::to_string(value.status()));
-    return value.release();
+// Hailos expect avbryter med ett felmeddelande om ett anrop misslyckas.
+HailoDetector::HailoDetector(const AppSettings& settings) : model(Hef::create(settings.yolo_file.string()).expect("Kan inte läsa YOLO:s HEF-fil.")) {
+    std::ifstream labels(settings.label_file);
+    std::string name;
+    while (std::getline(labels, name)) {
+        if (!name.empty() && name.back() == '\r') name.pop_back();
+        if (!name.empty()) class_names.push_back(name);
+    }
+    if (class_names.empty()) throw std::runtime_error("YOLO behöver klassnamn i yolo/classes.txt.");
+    minimum_score = settings.values["detector"]["confidence"].as<float>();
+    class_outputs = settings.values["detector"]["class_outputs"].as<std::vector<std::string>>(std::vector<std::string>{});
+    // Fyra klasser ger samma kanalantal som boxutgångarna, så då behöver utgångarna namnges.
+    if (class_names.size() == 4 && class_outputs.size() != 3) throw std::runtime_error("Ange klassutgångarnas namn i detector.class_outputs för en HEF med fyra klasser.");
+
+    hailo_vdevice_params_t device_settings;
+    hailo_status status = hailo_init_vdevice_params(&device_settings);
+    if (status != HAILO_SUCCESS) throw std::runtime_error("Kan inte förbereda Hailo-enheten.");
+    device_settings.scheduling_algorithm = HAILO_SCHEDULING_ALGORITHM_NONE;
+    // En annan process kan använda Hailo just nu. Vänta högst tre minuter.
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(180);
+    while (!device) {
+        auto available_device = VDevice::create(device_settings);
+        if (available_device) device = available_device.release();
+        else {
+            if (std::chrono::steady_clock::now() >= deadline) throw std::runtime_error("Hailo-enheten är upptagen eller saknas.");
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+    auto groups = device->configure(model).expect("Kan inte ladda nätverket på Hailo.");
+    network = groups.at(0);
+    auto inputs = model.get_input_vstream_infos().expect("Kan inte läsa modellens bildingång.");
+    outputs = model.get_output_vstream_infos().expect("Kan inte läsa modellens utgångar.");
+    if (inputs.size() != 1 || outputs.size() != 6) throw std::runtime_error("Använd YOLO26-exporten med sex utgångar från GD_tracking.");
+    input_name = inputs[0].name;
+    width = inputs[0].shape.width;
+    height = inputs[0].shape.height;
+    auto input_settings = network->make_input_vstream_params(false, HAILO_FORMAT_TYPE_UINT8, HAILO_DEFAULT_VSTREAM_TIMEOUT_MS, HAILO_DEFAULT_VSTREAM_QUEUE_SIZE).expect("Kan inte skapa bildingången.");
+    auto output_settings = network->make_output_vstream_params(false, HAILO_FORMAT_TYPE_FLOAT32, HAILO_DEFAULT_VSTREAM_TIMEOUT_MS, HAILO_DEFAULT_VSTREAM_QUEUE_SIZE).expect("Kan inte skapa modellutgångarna.");
+    for (auto& input : input_settings) input.second.user_buffer_format.order = HAILO_FORMAT_ORDER_NHWC;
+    for (auto& output : output_settings) output.second.user_buffer_format.order = HAILO_FORMAT_ORDER_NHWC;
+    streams = std::make_unique<InferVStreams>(InferVStreams::create(*network, input_settings, output_settings).expect("Kan inte öppna Hailos bildflöde."));
+    for (const auto& output : outputs) {
+        size_t bytes = streams->get_output_by_name(output.name).expect("Modellutgången saknas.").get().get_frame_size();
+        output_values[output.name].resize(bytes / sizeof(float));
+    }
+    activation = network->activate().expect("Kan inte aktivera Hailo-nätverket.");
 }
 
-class HailoDetector : public Detector {
-public:
-    explicit HailoDetector(const Settings& settings) : hef(checked(Hef::create(settings.yolo.string()))) {
-        std::ifstream labels(settings.labels);
-        std::string name;
-        while (std::getline(labels, name)) { if (!name.empty() && name.back() == '\r') name.pop_back(); if (!name.empty()) classes.push_back(name); }
-        if (classes.empty() || std::set<std::string>(classes.begin(), classes.end()).size() != classes.size()) throw std::runtime_error("yolo/classes.txt must contain unique labels in model order.");
-        confidence = settings.config["detector"]["confidence"].as<float>();
-        hailo_vdevice_params_t params;
-        auto status = hailo_init_vdevice_params(&params);
-        if (status != HAILO_SUCCESS) throw std::runtime_error("Cannot initialize Hailo device settings.");
-        params.scheduling_algorithm = HAILO_SCHEDULING_ALGORITHM_NONE;
-        // The annotation tool and orchestrator take turns using the accelerator.
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(180);
-        while (!device) {
-            auto available = VDevice::create(params);
-            if (available) device = available.release();
-            else if (std::chrono::steady_clock::now() >= deadline) throw std::runtime_error("Cannot reserve Hailo-8: " + std::to_string(available.status()));
-            else std::this_thread::sleep_for(std::chrono::seconds(1));
-        }
-        auto groups = checked(device->configure(hef));
-        if (groups.size() != 1) throw std::runtime_error("Expected one YOLO network group.");
-        network = groups[0];
-        auto inputs = checked(hef.get_input_vstream_infos());
-        outputs = checked(hef.get_output_vstream_infos());
-        if (inputs.size() != 1 || inputs[0].shape.features != 3 || outputs.size() != 6) throw std::runtime_error("Use the YOLO26 six-output Hailo-8 export from GD_tracking.");
-        input_name = inputs[0].name;
-        width = inputs[0].shape.width;
-        height = inputs[0].shape.height;
-        auto in_params = checked(network->make_input_vstream_params(false, HAILO_FORMAT_TYPE_UINT8, HAILO_DEFAULT_VSTREAM_TIMEOUT_MS, HAILO_DEFAULT_VSTREAM_QUEUE_SIZE));
-        auto out_params = checked(network->make_output_vstream_params(false, HAILO_FORMAT_TYPE_FLOAT32, HAILO_DEFAULT_VSTREAM_TIMEOUT_MS, HAILO_DEFAULT_VSTREAM_QUEUE_SIZE));
-        for (auto& entry : in_params) entry.second.user_buffer_format.order = HAILO_FORMAT_ORDER_NHWC;
-        for (auto& entry : out_params) entry.second.user_buffer_format.order = HAILO_FORMAT_ORDER_NHWC;
-        pipeline = std::make_unique<InferVStreams>(checked(InferVStreams::create(*network, in_params, out_params)));
-        for (const auto& info : outputs) {
-            size_t bytes = checked(pipeline->get_output_by_name(info.name)).get().get_frame_size();
-            buffers[info.name].resize(bytes / sizeof(float));
-        }
-        active = checked(network->activate());
-    }
+// Kör modellen och översätter varje rutnätspunkt till en produktruta i den inskickade bilden.
+std::vector<Detection> HailoDetector::detect(const cv::Mat& image) {
+    float scale;
+    int left, top;
+    cv::Mat padded = resize_for_yolo(image, width, height, scale, left, top);
+    // MemoryView lånar bildens och buffertarnas datapekare under Hailo-körningen.
+    std::map<std::string, MemoryView> inputs, results;
+    inputs.emplace(input_name, MemoryView(padded.data, padded.total() * padded.elemSize()));
+    for (auto& output : output_values) results.emplace(output.first, MemoryView(output.second.data(), output.second.size() * sizeof(float)));
+    hailo_status status = streams->infer(inputs, results, 1);
+    if (status != HAILO_SUCCESS) throw std::runtime_error("YOLO-körningen på Hailo misslyckades: " + std::to_string(status));
 
-    std::vector<Detection> detect(const cv::Mat& rgb) override {
-        float scale;
-        int left, top;
-        cv::Mat image = letterbox(rgb, width, height, scale, left, top);
-        std::map<std::string, MemoryView> in{{input_name, MemoryView(image.data, image.total() * image.elemSize())}}, out;
-        for (auto& entry : buffers) out.emplace(entry.first, MemoryView(entry.second.data(), entry.second.size() * sizeof(float)));
-        auto status = pipeline->infer(in, out, 1);
-        if (status != HAILO_SUCCESS) throw std::runtime_error("Hailo inference failed: " + std::to_string(status));
+    std::vector<Detection> detections;
+    for (const auto& box_output : outputs) {
+        bool is_class_output = std::find(class_outputs.begin(), class_outputs.end(), box_output.name) != class_outputs.end();
+        if (box_output.shape.features != 4 || is_class_output) continue;
+        // Pekaren lånar beskrivningen av klassutgången från outputs. Den ska inte frigöras här.
+        const hailo_vstream_info_t* class_output = nullptr;
+        for (const auto& output : outputs) {
+            bool correct_name = class_outputs.empty() || std::find(class_outputs.begin(), class_outputs.end(), output.name) != class_outputs.end();
+            bool same_grid = output.shape.height == box_output.shape.height && output.shape.width == box_output.shape.width;
+            if (std::string(output.name) != box_output.name && same_grid && output.shape.features == class_names.size() && correct_name) class_output = &output;
+        }
+        if (!class_output) throw std::runtime_error("HEF-modellens klassutgångar stämmer inte med klassnamnen.");
+        const std::vector<float>& box_values = output_values.at(box_output.name);
+        const std::vector<float>& class_values = output_values.at(class_output->name);
+        bool needs_sigmoid = false;
+        for (float value : class_values) if (value < 0 || value > 1) needs_sigmoid = true;
 
-        // Each scale has four box distances and one score per detector class.
-        std::vector<Detection> rows;
-        for (const auto& boxes : outputs) {
-            if (boxes.shape.features != 4) continue;
-            const hailo_vstream_info_t* scores = nullptr;
-            for (const auto& item : outputs) if (std::string(item.name) != boxes.name && item.shape.height == boxes.shape.height && item.shape.width == boxes.shape.width && item.shape.features == classes.size()) scores = &item;
-            if (!scores) throw std::runtime_error("The HEF box and class outputs do not match classes.txt.");
-            const auto& box_data = buffers.at(boxes.name);
-            const auto& class_data = buffers.at(scores->name);
-            bool logits = std::any_of(class_data.begin(), class_data.end(), [](float v) { return v < 0 || v > 1; });
-            for (unsigned y = 0; y < boxes.shape.height; ++y) for (unsigned x = 0; x < boxes.shape.width; ++x) {
-                size_t cell = y * boxes.shape.width + x;
-                auto first = class_data.begin() + cell * classes.size();
-                auto best = std::max_element(first, first + classes.size());
-                float score = logits ? 1.0f / (1.0f + std::exp(-*best)) : *best;
-                if (score < confidence) continue;
-                const float* box = box_data.data() + cell * 4;
-                float stride_x = float(width) / boxes.shape.width, stride_y = float(height) / boxes.shape.height;
-                float x1 = std::clamp(((x + 0.5f - box[0]) * stride_x - left) / scale, 0.0f, float(rgb.cols));
-                float y1 = std::clamp(((y + 0.5f - box[1]) * stride_y - top) / scale, 0.0f, float(rgb.rows));
-                float x2 = std::clamp(((x + 0.5f + box[2]) * stride_x - left) / scale, 0.0f, float(rgb.cols));
-                float y2 = std::clamp(((y + 0.5f + box[3]) * stride_y - top) / scale, 0.0f, float(rgb.rows));
-                if (x2 > x1 && y2 > y1) rows.push_back({{x1, y1, x2 - x1, y2 - y1}, score, int(best - first)});
+        for (unsigned y = 0; y < box_output.shape.height; ++y) {
+            for (unsigned x = 0; x < box_output.shape.width; ++x) {
+                size_t cell = y * box_output.shape.width + x;
+                Detection detection;
+                detection.score = 0;
+                detection.label = 0;
+                detection.class_scores.resize(class_names.size());
+                for (size_t label = 0; label < class_names.size(); ++label) {
+                    float score = class_values[cell * class_names.size() + label];
+                    if (needs_sigmoid) score = 1.0f / (1.0f + std::exp(-score));
+                    detection.class_scores[label] = score;
+                    if (score > detection.score) { detection.score = score; detection.label = int(label); }
+                }
+                if (detection.score < minimum_score) continue;
+                // Pekaren lånar cellens fyra kantavstånd ur box_values.
+                const float* edges = box_values.data() + cell * 4;
+                float step_x = float(width) / box_output.shape.width;
+                float step_y = float(height) / box_output.shape.height;
+                float x1 = std::clamp(((x + 0.5f - edges[0]) * step_x - left) / scale, 0.0f, float(image.cols));
+                float y1 = std::clamp(((y + 0.5f - edges[1]) * step_y - top) / scale, 0.0f, float(image.rows));
+                float x2 = std::clamp(((x + 0.5f + edges[2]) * step_x - left) / scale, 0.0f, float(image.cols));
+                float y2 = std::clamp(((y + 0.5f + edges[3]) * step_y - top) / scale, 0.0f, float(image.rows));
+                detection.box = {x1, y1, x2 - x1, y2 - y1};
+                if (detection.box.area() > 0) detections.push_back(detection);
             }
         }
-        return rows;
     }
-private:
-    Hef hef;
-    std::unique_ptr<VDevice> device;
-    std::shared_ptr<ConfiguredNetworkGroup> network;
-    std::unique_ptr<ActivatedNetworkGroup> active;
-    std::unique_ptr<InferVStreams> pipeline;
-    std::vector<hailo_vstream_info_t> outputs;
-    std::map<std::string, std::vector<float>> buffers;
-    std::string input_name;
-    int width = 640, height = 640;
-    float confidence = 0.15;
-};
-
-std::unique_ptr<Detector> make_hailo_detector(const Settings& settings) { return std::make_unique<HailoDetector>(settings); }
+    return detections;
+}

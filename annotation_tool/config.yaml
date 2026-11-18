@@ -1,14 +1,13 @@
-#------------------------------------------------------------
-# SERVER, STORAGE AND THE SHARED VIDEO PIPELINE
-#------------------------------------------------------------
-# Paths are relative to this file. Everyone uses ONE server.
-host: 127.0.0.1  # Use --host 0.0.0.0 on the Pi to open it from a laptop.
+# Verktygets egna filer ligger under annotation_tool och kan tas bort tillsammans med mappen.
+host: 127.0.0.1
 port: 9000
-storage: ../data/acquisition  # Reviewer names and categories; clips are in videos/ here.
-# Models, zones, cameras and upload limits: the same file production uses.
+storage: data
 video_config: ../configs/video.yaml
-# Labels for review and training exports. Adding a label does not train ViT.
-# Keep the installed dataset's category names so its images can be reused.
+preview_width: 1280
+preview_preset: veryfast
+# Valfritt: sökväg till smart-fridge-edge/database/fridge.sqlite3 på samma dator.
+# Databasen öppnas enbart för läsning. Videor och rättningar kopieras till verktygets storage.
+edge_database: null
 categories:
   # Dairy, eggs and plant-based alternatives.
   - milk

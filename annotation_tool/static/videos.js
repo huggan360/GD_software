@@ -76,9 +76,9 @@ async function refresh() {
     return;
   }
   const library = state.library;
+  $("edge-import-button").disabled = !library.edge_available;
   if (!$('upload-camera').options.length) {
     for (const camera of Object.keys(library.cameras)) $('upload-camera').append(new Option(camera, camera));
-    buildRecordControls(library.recordable);
   }
   const signature = JSON.stringify(library.items.map((item) => [item.id, item.status, item.progress, item.reviewed, item.movements]));
   if (signature !== state.signature) {
@@ -107,25 +107,18 @@ function renderList() {
   }
 }
 
-function buildRecordControls(cameras) {
-  const box = $('record-controls');
-  if (!cameras.length) return;
-  const length = element('input', {type: 'number', min: '1', max: '120', value: '10', title: 'Seconds'});
-  box.append(element('span', {}, 'Record'), length, element('span', {}, 's'));
-  for (const camera of cameras) {
-    box.append(element('button', {class: 'primary', onclick: async (event) => {
-      event.target.disabled = true;
-      toast(`Recording ${camera} for ${length.value} s…`);
-      try {
-        const result = await api('/api/videos/record', 'POST', {camera, seconds: Number(length.value)});
-        state.current = result.id;
-        toast(`Recorded ${camera}. Processing…`);
-        refresh();
-      } catch (error) { toast(error.message, true); }
-      event.target.disabled = false;
-    }}, camera));
-  }
-}
+// Läser färdiga körningar från edge. Rättningar sparas bara i verktygets egen mapp.
+$('edge-import-button').addEventListener('click', async () => {
+  const button = $('edge-import-button');
+  button.disabled = true;
+  try {
+    const result = await api('/api/edge/import', 'POST');
+    toast(`${result.imported} klipp hämtade från edge. ${result.missing} saknar tillgänglig video.`);
+    state.signature = '';
+    await refresh();
+  } catch (error) { toast(error.message, true); }
+  button.disabled = !state.library?.edge_available;
+});
 
 // ---------------------------------------------------------
 // OPEN ONE CLIP
@@ -159,6 +152,10 @@ function renderHeading() {
   const warnings = result ? result.warnings : [];
   $('video-warning').hidden = !warnings.length;
   $('video-warning').textContent = warnings.join(' ');
+  const applied = result?.ignored_region;
+  $('ignored-area-info').textContent = applied
+    ? `YOLO hoppar över högra ${applied.right_pixels} px av originalbilden. Gränsen är fast.`
+    : 'Högra 300 px hoppas över vid nästa modellkörning. Äldre resultat kan innehålla spår där.';
 }
 
 // ---------------------------------------------------------
@@ -235,6 +232,36 @@ $('save-review').addEventListener('click', async () => {
   } catch (error) { toast(error.message, true); }
 });
 
+// Visar det fasta området som aldrig skickas till YOLO. Koordinaterna kommer från körningens resultat.
+function drawIgnoredArea(context, pictureBox) {
+  const result = state.detail?.result;
+  if (!result) return;
+  let ignored = result.ignored_region;
+  if (!ignored) {
+    // För äldre klipp visar vi vad nästa körning kommer att hoppa över.
+    const width = result.video.width;
+    ignored = {right_pixels: 300, box: [Math.max(0, (width - 300) / width), 0, 1, 1]};
+  }
+  const [x, y, width, height] = pictureBox(ignored.box);
+  context.save();
+  context.beginPath();
+  context.rect(x, y, width, height);
+  context.clip();
+  context.fillStyle = 'rgba(180, 35, 35, 0.20)';
+  context.fillRect(x, y, width, height);
+  context.strokeStyle = 'rgba(160, 35, 35, 0.45)';
+  for (let line = x - height; line < x + width; line += 16) {
+    context.beginPath();
+    context.moveTo(line, y);
+    context.lineTo(line + height, y + height);
+    context.stroke();
+  }
+  context.fillStyle = '#812020';
+  const label = result.ignored_region ? 'YOLO ignorerar området' : 'Undantas vid nästa körning';
+  context.fillText(label, x + 8, y + 20);
+  context.restore();
+}
+
 // ---------------------------------------------------------
 // OVERLAY: ZONES AND THE BOXES VISIBLE AT THE CURRENT TIME
 // ---------------------------------------------------------
@@ -254,6 +281,7 @@ function draw() {
   context.clearRect(0, 0, width, height);
   context.lineWidth = 2;
   context.font = '12px Arial';
+  drawIgnoredArea(context, box);
   for (const [name, rect] of Object.entries(state.zones || {})) {
     if (!rect) continue;
     context.strokeStyle = ZONE_COLORS[name];

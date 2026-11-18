@@ -15,4 +15,6 @@ def read_settings(path):
     settings = yaml.safe_load(path.read_text())
     for key in ("storage", "video_config"):
         settings[key] = str((path.parent / settings[key]).resolve())
+    if settings.get("edge_database"):
+        settings["edge_database"] = str((path.parent / settings["edge_database"]).resolve())
     return settings

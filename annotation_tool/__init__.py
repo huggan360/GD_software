@@ -1,1 +1,1 @@
-"""Shared fridge image collection and annotation tool."""
+"""Fristående utvecklingsverktyg. C++-programmet använder inga filer från denna mapp."""

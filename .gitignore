@@ -9,7 +9,5 @@ vit/*
 yolo/*
 !yolo/.gitkeep
 data/*
-!data/acquisition/
-data/acquisition/*
-!data/acquisition/.gitkeep
+!data/.gitkeep
 runs/

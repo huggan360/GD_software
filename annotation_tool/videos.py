@@ -1,7 +1,6 @@
 # ---------------------
-# VIDEO REVIEW: UPLOAD/RECORD -> SHARED VIDEO PIPELINE -> CORRECT TRACKS
+# Utvecklingsverktyg: läs klipp och resultat, granska spår och exportera träningsdata.
 # ---------------------
-# Clips are stored in the data-acquisition folder; all model code lives in production.
 import json
 import re
 import secrets
@@ -15,8 +14,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from annotation_tool.store import StoreError, category_name
-from production.video import VideoPipeline, load_config, movements, save_zones, write_json
-from production.zones import analyse_tracks
+from annotation_tool.program import ClassifierProgram, load_config, movements, save_zones, write_json
+from annotation_tool.edge import import_edge_videos
+from annotation_tool.zones import analyse_tracks
 
 VIDEO_ID = re.compile(r"[0-9a-f]{24}")
 EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".h264", ".m4v"}
@@ -28,12 +28,6 @@ EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".h264", ".m4v"}
 class ZonesRequest(BaseModel):
     inside: list[float] | None
     outside: list[float] | None
-
-
-class RecordRequest(BaseModel):
-    camera: str
-    seconds: float = Field(gt=0, le=120)
-    event_id: str = Field(default="", max_length=120)
 
 
 class ReviewRequest(BaseModel):
@@ -52,13 +46,14 @@ class ReclassifyRequest(BaseModel):
 class VideoLibrary:
     """One folder per clip; meta.json holds queue state, result.json the model output."""
 
-    def __init__(self, config_path):
-        self.config_path = config_path
-        self.config = load_config(config_path)
-        self.root = Path(self.config["acquisition_directory"]) / "videos"
+    def __init__(self, settings):
+        self.settings = settings
+        self.config_path = settings["video_config"]
+        self.config = load_config(self.config_path)
+        self.root = Path(settings["storage"]) / "videos"
         self.root.mkdir(parents=True, exist_ok=True)
         self.lock = threading.Lock()
-        self.pipeline = None
+        self.program = None
         self.message = "Video models load when the first clip is processed."
         self.stop_event = threading.Event()
         self.thread = threading.Thread(target=self.work, daemon=True, name="video-pipeline")
@@ -98,13 +93,14 @@ class VideoLibrary:
                     continue
                 destination = backup / video_id
                 destination.mkdir(parents=True)
-                paths = [folder / name for name in ("meta.json", "result.json", "review.json")]
+                paths = [folder / name for name in ("meta.json", "result.json", "review.json", ".edge-result.json")]
                 paths.extend(folder.glob("track-*.jpg"))
                 for path in paths:
                     if path.is_file():
                         shutil.copy2(path, destination / path.name)
                 # Human track corrections cannot be attached to new tracking IDs.
                 (folder / "review.json").unlink(missing_ok=True)
+                (folder / ".edge-result.json").unlink(missing_ok=True)
                 meta.update(
                     status="queued",
                     progress=0,
@@ -205,20 +201,16 @@ class VideoLibrary:
             folder = self.root / meta["id"]
             try:
                 self.update(meta["id"], status="running", message="Loading models")
-                if self.pipeline is None:
-                    self.pipeline = VideoPipeline(self.config)
-                    self.message = self.pipeline.message
+                if self.program is None:
+                    self.program = ClassifierProgram(self.config, self.settings)
+                    self.message = self.program.message
                 started = time.monotonic()
-                self.pipeline.run(
-                    folder / meta["original"],
-                    folder,
-                    meta["camera"],
-                    self.config["cameras"][meta["camera"]],
-                    meta["event_id"],
-                    progress=lambda value, text: self.update(
-                        meta["id"], progress=value, message=text
-                    ),
-                )
+                source = folder / meta["original"]
+                edge_result = folder / ".edge-result.json"
+                if edge_result.is_file():
+                    self.program.prepare_review(source, folder, json.loads(edge_result.read_text()))
+                else:
+                    self.program.run(source, folder, meta["camera"], self.config["cameras"][meta["camera"]], meta["event_id"], progress=lambda value, text: self.update(meta["id"], progress=value, message=text))
                 self.update(
                     meta["id"],
                     status="done",
@@ -227,10 +219,6 @@ class VideoLibrary:
                 )
             except Exception as error:
                 self.update(meta["id"], status="failed", message=str(error)[:1000])
-            finally:
-                # The live system's ML runs need the Hailo-8 too.
-                if self.pipeline is not None and hasattr(self.pipeline, "release"):
-                    self.pipeline.release()
 
     # ---------------------
     # REVIEWED TRACK CROPS -> classification/<category>/ FOR train_vit.py
@@ -263,11 +251,6 @@ class VideoLibrary:
                         crop, f"classification/{values['category']}/{meta['id']}-{track['id']}.jpg"
                     )
                     count += 1
-            archive.writestr(
-                "README.txt",
-                f"{count} reviewed track crops from fridge videos. "
-                "Merge classification/ into the ViT training data and run: python train_vit.py\n",
-            )
         if not count:
             Path(handle.name).unlink()
             raise StoreError("No reviewed, labelled tracks to export yet.", 409)
@@ -288,15 +271,15 @@ class VideoLibrary:
             for event in track["events"]:
                 event["event_start"] = result["offset_seconds"] + event["start"]
                 event["event_end"] = result["offset_seconds"] + event["end"]
+        # Behåll modellernas varningar när endast zonerna räknas om.
+        warnings = [message for message in result.get("warnings", []) if not message.startswith(("Rita både", "Set both zones"))]
+        if not all(zones.values()):
+            warnings.append("Rita både insida och utsida innan in- och utpassager kan räknas.")
         result.update(
             zones=zones,
             tracks=tracks,
             movements=movements(tracks),
-            warnings=(
-                []
-                if all(zones.values())
-                else ["Set both zones before interpreting in/out movements."]
-            ),
+            warnings=warnings,
         )
         write_json(path, result)
         return result
@@ -307,7 +290,7 @@ class VideoLibrary:
 # ---------------------
 def add_video_routes(app, settings, store):
     """Register the video API."""
-    library = VideoLibrary(settings["video_config"])
+    library = VideoLibrary(settings)
     app.state.videos = library
     limit = library.config["video"]["max_upload_mb"] * 1024 * 1024
 
@@ -321,7 +304,7 @@ def add_video_routes(app, settings, store):
         return {
             "items": library.items(),
             "cameras": config["cameras"],
-            "recordable": sorted(config.get("capture", {})),
+            "edge_available": bool(settings.get("edge_database") and Path(settings["edge_database"]).is_file()),
             "categories": store.categories(),
             "model_message": library.message,
             "sample_fps": config["tracking"]["sample_fps"],
@@ -371,24 +354,10 @@ def add_video_routes(app, settings, store):
             background=BackgroundTask(path.unlink, missing_ok=True),
         )
 
-    @app.post("/api/videos/record")
-    def record_video(body: RecordRequest, x_session: str = Header()):
-        from utils.record_clip import record
-
+    @app.post("/api/edge/import")
+    def read_edge_videos(x_session: str = Header()):
         name = editor(x_session)
-        capture = library.config.get("capture", {})
-        if body.camera not in capture:
-            raise StoreError("This camera has no capture settings in configs/video.yaml.")
-        try:
-            path = record(
-                capture[body.camera],
-                body.seconds,
-                Path(library.config["acquisition_directory"]) / "recordings",
-                body.camera,
-            )
-        except (RuntimeError, ValueError, OSError) as error:
-            raise StoreError(str(error), 503) from error
-        return {"id": library.add(path, path.name, body.camera, body.event_id.strip(), name)}
+        return import_edge_videos(settings.get("edge_database"), library, name)
 
     @app.post("/api/videos/reclassify")
     def reclassify_all(body: ReclassifyRequest, x_session: str = Header()):

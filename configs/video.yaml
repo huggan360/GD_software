@@ -1,11 +1,7 @@
-# Runtime settings shared by the classifier and unchanged annotation tool.
+# Inställningar för C++-programmets modellkörning.
 backend: hailo
-device: cpu
 models_directory: ..
-acquisition_directory: ../data/acquisition
-production_directory: ../runs
-zones_file: ../data/acquisition/zones.json
-retention_runs: 3
+zones_file: ../data/zones.json
 
 detector:
   weights: yolo/yolo.pth  # Optional compiled CPU model for local development.
@@ -19,9 +15,10 @@ detector:
 classifier:
   checkpoint: vit/vit.pth  # Exported by GD_vision/compile/export.py; labels are inside.
   confidence: 0.0
-  crops_per_track: 3
+  crops_per_track: 5
+  vit_weight: 0.7
 tracking:
-  sample_fps: 5
+  sample_fps: 0
   stable_frames: 2
   dwell_seconds: 0.2
   max_gap_seconds: 1.0
@@ -31,8 +28,6 @@ video:
   max_duration_seconds: 200
   max_upload_mb: 1024
   max_pixels: 16777216
-  proxy_width: 1280
-  proxy_preset: veryfast
 cameras:
   fridge:
     inside: null
@@ -40,7 +35,3 @@ cameras:
   door:
     inside: null
     outside: null
-# Used only by the annotation tool's existing Record button.
-capture:
-  fridge: {kind: rpicam, camera: 0, width: 1280, height: 720, fps: 30}
-  door: {kind: rpicam, camera: 1, width: 1280, height: 720, fps: 30}

@@ -91,8 +91,6 @@ canvas { display: block; margin: auto; touch-action: none; max-width: none; back
    VIDEO REVIEW
    --------------------------------------------------------- */
 .nav-link { font-size: 12px; color: #386b9b; margin-right: 6px; }
-.record-controls { display: flex; gap: 4px; align-items: center; font-size: 12px; }
-.record-controls input { width: 52px; padding: 4px; }
 .video-stage { flex: 1; min-height: 200px; overflow: auto; background: #eee; padding: 16px; display: flex; align-items: center; justify-content: center; }
 .video-frame { position: relative; display: inline-block; max-width: 100%; }
 .video-frame video { display: block; max-width: 100%; max-height: calc(100dvh - 230px); background: #000; }
@@ -142,3 +140,6 @@ dialog input, dialog select { width: 100%; }
   .image-card img { height: 70px; }
   .editor-heading { flex-wrap: wrap; }
 }
+
+/* Informationen är bara en förklaring. Gränsen går inte att ändra i verktyget. */
+.ignored-area-note { margin: 0; padding: 8px 16px; background: #fff3f3; color: #8f2525; border-bottom: 1px solid #e8caca; font-size: 12px; }
