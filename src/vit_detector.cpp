@@ -69,8 +69,6 @@ void classify_product_vit(ProductTrack& track, ImageModel& vit, const std::vecto
         for (size_t i = 0; i < final_scores.size(); ++i) final_scores[i] = vit_weight * vit_scores[i] + (1 - vit_weight) * yolo_scores[i];
     }
     track.details["vit_top_categories"] = top_three(vit_scores, vit.class_names);
-    track.details["yolo_top_categories"] = Json::array();
-    if (combine) track.details["yolo_top_categories"] = top_three(yolo_scores, vit.class_names);
     track.details["top_categories"] = top_three(final_scores, vit.class_names);
     Json best = track.details["top_categories"][0];
     track.details["classification_confidence"] = best["confidence"];

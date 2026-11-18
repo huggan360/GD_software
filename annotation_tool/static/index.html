@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Review</title>
-  <link rel="stylesheet" href="/static/style.css?v=7">
-  <script src="/static/videos.js?v=6" defer></script>
+  <link rel="stylesheet" href="/static/style.css?v=8">
+  <script src="/static/videos.js?v=7" defer></script>
 </head>
 <body>
   <!-- ---------------------------------------------------- -->
@@ -38,7 +38,7 @@
           <button id="zone-clear">Clear zones</button>
           <button id="zone-save" class="primary">Save zones &amp; re-check</button>
         </div>
-        <div class="tool-group"><label class="empty-check"><input id="show-all" type="checkbox">Show all tracks</label><button id="rerun-button">Run models again</button></div>
+        <div class="tool-group"><label class="empty-check"><input id="show-all" type="checkbox">Show all objects</label><button id="rerun-button">Run models again</button></div>
       </div>
       <p id="ignored-area-info" class="ignored-area-note">Högra 300 px hoppas alltid över av YOLO. Gränsen är fast.</p>
       <div class="video-stage" id="video-stage">
@@ -56,7 +56,7 @@
     <aside class="inspector">
       <div class="panel-heading"><h2>Movements</h2><span id="movement-count" class="count-pill">0</span></div>
       <div id="movement-list" class="movement-list"><p class="muted">No clip selected.</p></div>
-      <div class="panel-heading"><h2>Tracks</h2><span id="track-count" class="count-pill">0</span></div>
+      <div class="panel-heading"><h2>Objects</h2><span id="track-count" class="count-pill">0</span></div>
       <div id="track-list" class="track-list"></div>
       <label class="field-label" for="notes">Notes</label><textarea id="notes" rows="2" maxlength="4000"></textarea>
       <label class="empty-check"><input id="reviewed" type="checkbox">Reviewed</label>

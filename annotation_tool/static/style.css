@@ -33,7 +33,7 @@ kbd { font: 11px monospace; margin-left: 5px; color: #777; }
 .tab.active { background: #e7e7e7; border-color: #777; }
 .tab span { margin-left: 5px; font-size: 12px; color: #666; }
 .nav-right { font-size: 12px; }
-.workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: 200px minmax(300px, 1fr) 245px; }
+.workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: 200px minmax(300px, 1fr) 300px; }
 .queue-panel { border-right: 1px solid #ccc; padding: 10px; overflow-y: auto; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .image-list { display: flex; flex-direction: column; gap: 8px; }
@@ -101,12 +101,17 @@ canvas { display: block; margin: auto; touch-action: none; max-width: none; back
 .movement-row b { min-width: 30px; }
 .movement-row.in b { color: #2b7a3b; }
 .movement-row.out b { color: #a3521b; }
-.track-list { display: flex; flex-direction: column; gap: 6px; max-height: 45vh; overflow-y: auto; }
-.track-row { border: 1px solid #ccc; border-radius: 3px; padding: 6px; font-size: 11px; display: grid; grid-template-columns: 56px 1fr; gap: 6px; }
+.track-list { display: flex; flex-direction: column; flex-shrink: 0; gap: 6px; }
+.track-row { border: 1px solid #ccc; border-radius: 3px; padding: 6px; font-size: 11px; display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 6px; }
 .track-row.active { border-color: #386b9b; background: #eef2f6; }
 .track-row img { width: 56px; height: 56px; object-fit: contain; background: #ddd; cursor: pointer; }
 .track-row select { width: 100%; font-size: 11px; padding: 3px; margin-top: 3px; }
 .track-row .ignore { display: flex; gap: 4px; align-items: center; margin-top: 3px; }
+.object-details { min-width: 0; overflow-wrap: anywhere; }
+.model-predictions { margin-top: 7px; line-height: 1.5; }
+.model-prediction { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.prediction-score { white-space: nowrap; color: #666; }
+.object-decision { margin-top: 7px; padding-top: 6px; border-top: 1px solid #ddd; line-height: 1.5; }
 .card-progress { height: 3px; background: #386b9b; }
 /* ---------------------------------------------------------
    FORMS AND SMALL SCREENS
@@ -124,7 +129,7 @@ dialog input, dialog select { width: 100%; }
 .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 10px 14px; background: #333; color: white; font-size: 12px; max-width: 650px; z-index: 20; }
 .toast.error { background: #803c32; }
 @media (max-width: 950px) {
-  .workspace { grid-template-columns: 155px minmax(260px, 1fr) 210px; }
+  .workspace { grid-template-columns: 155px minmax(260px, 1fr) 245px; }
   .presence { max-width: 200px; overflow: hidden; white-space: nowrap; }
   .image-card img { height: 85px; }
   .save-state { max-width: 110px; }

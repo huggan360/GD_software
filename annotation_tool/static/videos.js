@@ -167,6 +167,16 @@ function review(trackId) {
   return saved || {category: track.category.startsWith('imagenet-') ? 'unknown' : track.category, ignored: track.ignored, direction: 'auto'};
 }
 
+// Visar modellens tre bästa förslag i den ordning som sparats i resultatet.
+function modelPredictions(title, predictions) {
+  const section = element('div', {class: 'model-predictions'}, element('strong', {}, title));
+  for (const row of (predictions || []).slice(0, 3)) {
+    section.append(element('div', {class: 'model-prediction'}, element('span', {}, row.category.replace('imagenet-', '')), element('span', {class: 'prediction-score'}, `${(row.confidence * 100).toFixed(1)}%`)));
+  }
+  if (!predictions?.length) section.append(element('div', {class: 'muted'}, 'No saved predictions'));
+  return section;
+}
+
 function renderInspector() {
   const result = state.detail?.result;
   $('movement-list').replaceChildren();
@@ -197,13 +207,18 @@ function renderInspector() {
     direction.value = values.direction;
     const ignore = element('input', {type: 'checkbox', 'data-track': track.id, 'data-field': 'ignored'});
     ignore.checked = values.ignored;
-    const guesses = (track.top_categories || []).map((row) => `${row.category.replace('imagenet-', '')} ${(row.confidence * 100).toFixed(0)}%`).join(', ');
+    // Äldre resultat med enbart ViT har sina förslag i top_categories.
+    const vitPredictions = track.vit_top_categories || (track.label_source === 'grocery-vit' ? track.top_categories : []);
+    const decision = track.label_source === 'unclassified' ? 'Not classified' : `${track.category}${track.classification_confidence != null ? ` ${(track.classification_confidence * 100).toFixed(1)}%` : ''}`;
     const first = track.observations[0];
-    const image = track.crop_file ? element('img', {src: `/api/videos/${state.current}/files/${track.crop_file}`, alt: `Track ${track.id}`, onclick: () => seek(track.id, first.time)}) : element('div');
+    const image = track.crop_file ? element('img', {src: `/api/videos/${state.current}/files/${track.crop_file}`, alt: `Object ${track.id}`, onclick: () => seek(track.id, first.time)}) : element('div');
     $('track-list').append(element('div', {class: `track-row${state.selected === track.id ? ' active' : ''}`, id: `track-${track.id}`}, image,
-      element('div', {},
-        element('div', {}, element('strong', {}, `#${track.id} `), `${track.source_label}, ${seconds(first.time)}–${seconds(track.observations.at(-1).time)}`),
-        element('div', {class: 'muted'}, guesses || 'not classified (did not move)'),
+      element('div', {class: 'object-details'},
+        element('strong', {}, `#${track.id}`),
+        element('div', {class: 'muted'}, `${seconds(first.time)}–${seconds(track.observations.at(-1).time)}`),
+        modelPredictions('ViT top 3', vitPredictions),
+        modelPredictions('YOLO top 3', track.yolo_top_categories),
+        element('div', {class: 'object-decision'}, element('strong', {}, 'Decision'), element('div', {}, decision)),
         category, direction, element('label', {class: 'ignore'}, ignore, 'Ignore (not a product)'))));
   }
 }

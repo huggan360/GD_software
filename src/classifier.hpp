@@ -139,6 +139,8 @@ Json process_video(const RunOptions& options, const AppSettings& settings);
 
 // Matchar klassnamnen så att YOLO:s poäng hamnar i samma ordning som ViT:s.
 std::vector<int> match_class_names(const std::vector<std::string>& yolo_names, const std::vector<std::string>& vit_names);
+// Plockar ut modellens tre högsta poäng med tillhörande klassnamn.
+Json top_three(std::vector<float> scores, const std::vector<std::string>& names);
 // Klassificerar spårets utvalda bilder med ViT och kombinerar användbara YOLO-poäng.
 void classify_product_vit(ProductTrack& track, ImageModel& vit, const std::vector<int>& class_order, float vit_weight, float minimum_score);
 

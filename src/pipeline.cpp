@@ -104,6 +104,19 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
         find_movements(product, zones, tracking, offset);
         double movement = track_movement(product.details["observations"]);
         product.details["movement"] = movement;
+        // Sparar YOLO:s egna förslag från de valda bilderna, även om ViT har andra klassnamn.
+        std::vector<float> yolo_scores(detector.class_names.size(), 0);
+        int yolo_photos = 0;
+        for (const ProductPhoto& photo : product.photos) {
+            if (photo.yolo_scores.size() != yolo_scores.size()) continue;
+            for (size_t i = 0; i < yolo_scores.size(); ++i) yolo_scores[i] += photo.yolo_scores[i];
+            ++yolo_photos;
+        }
+        product.details["yolo_top_categories"] = Json::array();
+        if (yolo_photos > 0) {
+            for (float& score : yolo_scores) score /= yolo_photos;
+            product.details["yolo_top_categories"] = top_three(yolo_scores, detector.class_names);
+        }
         if (!product.photos.empty()) {
             product.details["best_view_time"] = best_photo_time(product);
             if (!product.details["events"].empty() || movement >= tracking["minimum_movement"].as<double>()) {
