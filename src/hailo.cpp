@@ -27,6 +27,7 @@ HailoDetector::HailoDetector(const AppSettings& settings) : model(Hef::create(se
     device_settings.scheduling_algorithm = HAILO_SCHEDULING_ALGORITHM_NONE;
     // En annan process kan använda Hailo just nu. Vänta högst tre minuter.
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(180);
+    auto stage_start = Clock::now();
     while (!device) {
         auto available_device = VDevice::create(device_settings);
         if (available_device) device = available_device.release();
@@ -35,6 +36,8 @@ HailoDetector::HailoDetector(const AppSettings& settings) : model(Hef::create(se
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }
+    timings.add("hailo_wait", stage_start);
+    stage_start = Clock::now();
     auto groups = device->configure(model).expect("Kan inte ladda nätverket på Hailo.");
     network = groups.at(0);
     auto inputs = model.get_input_vstream_infos().expect("Kan inte läsa modellens bildingång.");
@@ -53,10 +56,12 @@ HailoDetector::HailoDetector(const AppSettings& settings) : model(Hef::create(se
         output_values[output.name].resize(bytes / sizeof(float));
     }
     activation = network->activate().expect("Kan inte aktivera Hailo-nätverket.");
+    timings.add("hailo_setup", stage_start);
 }
 
 // Kör modellen och översätter varje rutnätspunkt till en produktruta i den inskickade bilden.
 std::vector<Detection> HailoDetector::detect(const cv::Mat& image) {
+    auto stage_start = Clock::now();
     float scale;
     int left, top;
     cv::Mat padded = resize_for_yolo(image, width, height, scale, left, top);
@@ -64,9 +69,14 @@ std::vector<Detection> HailoDetector::detect(const cv::Mat& image) {
     std::map<std::string, MemoryView> inputs, results;
     inputs.emplace(input_name, MemoryView(padded.data, padded.total() * padded.elemSize()));
     for (auto& output : output_values) results.emplace(output.first, MemoryView(output.second.data(), output.second.size() * sizeof(float)));
+    timings.add("yolo_prepare", stage_start);
+    stage_start = Clock::now();
     hailo_status status = streams->infer(inputs, results, 1);
+    // Anropet väntar på hela svaret. Tiden innehåller överföring till och från Hailo.
+    timings.add("yolo_inference", stage_start);
     if (status != HAILO_SUCCESS) throw std::runtime_error("YOLO-körningen på Hailo misslyckades: " + std::to_string(status));
 
+    stage_start = Clock::now();
     std::vector<Detection> detections;
     for (const auto& box_output : outputs) {
         bool is_class_output = std::find(class_outputs.begin(), class_outputs.end(), box_output.name) != class_outputs.end();
@@ -111,5 +121,6 @@ std::vector<Detection> HailoDetector::detect(const cv::Mat& image) {
             }
         }
     }
+    timings.add("yolo_decode", stage_start);
     return detections;
 }

@@ -94,6 +94,7 @@ std::vector<Detection> ProductDetector::detect(const cv::Mat& image) {
 
 // Kör lokal YOLO och översätter rutorna tillbaka till den inskickade bildens storlek.
 std::vector<Detection> ImageModel::detect(const cv::Mat& image, float minimum_score) {
+    auto stage_start = Clock::now();
     c10::InferenceMode inference;
     float scale;
     int left, top;
@@ -101,7 +102,11 @@ std::vector<Detection> ImageModel::detect(const cv::Mat& image, float minimum_sc
     // from_blob lånar bildens pixelpekare. Flyttalsomvandlingen skapar tensorvärden för modellen.
     torch::Tensor input = torch::from_blob(padded.data, {1, image_size, image_size, 3}, torch::kUInt8);
     input = input.permute({0, 3, 1, 2}).to(torch::kFloat32) / 255.0;
+    timings.add("yolo_prepare", stage_start);
+    stage_start = Clock::now();
     torch::IValue output = network.forward({input});
+    timings.add("yolo_inference", stage_start);
+    stage_start = Clock::now();
     if (output.isTuple()) output = output.toTuple()->elements()[0];
     torch::Tensor predictions = output.toTensor().contiguous();
     if (predictions.dim() != 3 || predictions.size(0) != 1) throw std::runtime_error("YOLO behöver lämna ett resultat för en bild.");
@@ -139,5 +144,6 @@ std::vector<Detection> ImageModel::detect(const cv::Mat& image, float minimum_sc
         detection.box = {x1, y1, x2 - x1, y2 - y1};
         if (detection.box.area() > 0) boxes.push_back(detection);
     }
+    timings.add("yolo_decode", stage_start);
     return boxes;
 }

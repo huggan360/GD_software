@@ -15,13 +15,18 @@ Json read_json(const fs::path& file) {
 
 // Byter namn på filen
 void write_json(const fs::path& file, const Json& value) {
+    auto start = Clock::now();
+    std::string text = value.dump(2);
+    timings.add("json_encode", start);
+    start = Clock::now();
     fs::create_directories(file.parent_path());
     fs::path temporary = file.string() + ".tmp";
     std::ofstream output(temporary);
-    output << value.dump(2) << '\n';
+    output << text << '\n';
     output.close();
     if (!output) throw std::runtime_error("Kan inte skriva " + file.string());
     fs::rename(temporary, file);
+    timings.add("json_write", start);
 }
 
 // tid för körningen
@@ -101,15 +106,27 @@ RunOptions read_options(int count, char** arguments) {
 
 // MAIN
 int main(int count, char** arguments) {
+    auto program_start = Clock::now();
     try {
         RunOptions options = read_options(count, arguments);
         if (fs::exists(options.result_file)) throw std::runtime_error("Filen finns redan");
+        auto start = Clock::now();
         AppSettings settings = load_settings(options);
+        timings.add("settings_load", start);
+        start = Clock::now();
         Json result = process_video(options, settings);
+        timings.add("pipeline_total", start);
+        // JSON-delen innehåller tiderna fram till sparandet. Skrivtid och hela programtiden finns i loggen.
+        result["timings_ms"] = timings.results();
+        result["timing_note"] = "Väggtid i ms. Totalsteg innehåller sina delsteg. JSON-skrivning och hela programtiden redovisas i loggen.";
         write_json(options.result_file, result);
+        timings.add("program_total", program_start);
+        timings.print();
         std::cout << options.result_file.string() << '\n';
         return 0;
     } catch (const std::exception& error) {
+        timings.add("program_total", program_start);
+        timings.print();
         std::cerr << "Körningen avbröts: " << error.what() << '\n';
         return 1;
     }

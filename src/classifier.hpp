@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <chrono>
 #include <filesystem>
 #include <map>
 #include <stdexcept>
@@ -17,6 +18,31 @@
 
 namespace fs = std::filesystem;
 using Json = nlohmann::json;
+using Clock = std::chrono::steady_clock;
+
+// En tidsmätning i millisekunder, samlad över alla anrop till samma steg.
+struct TimeReading {
+    size_t calls = 0;
+    double total = 0, first = 0, last = 0, minimum = 0, maximum = 0;
+};
+
+// Samlar väggtid för den här körningen. Tider för hela steg innehåller även deras delsteg.
+class Timings {
+public:
+    // Sparar tiden sedan start och lämnar tillbaka antalet millisekunder.
+    double add(const std::string& name, Clock::time_point start);
+    // Ger medeltiden för ett anrop till steget.
+    double average(const std::string& name) const;
+    // Gör tiderna till en del av programmets vanliga JSON-resultat.
+    Json results() const;
+    // Skriver alla mätvärden till körningens logg.
+    void print() const;
+private:
+    std::map<std::string, TimeReading> readings;
+};
+
+// Pipelinen arbetar på huvudtråden och använder samma tidssamling i alla C++-filer.
+extern Timings timings;
 
 // De sista 300 pixlarna till höger skickas aldrig till YOLO
 const int IGNORE_RIGHT_PIXELS = 300;

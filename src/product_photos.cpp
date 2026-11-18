@@ -9,11 +9,12 @@
 
 // plockar ut produktbilder som senare blir använda av ViT
 void keep_product_photo(ProductTrack& track, const cv::Mat& image, const cv::Rect2f& box, float score, double time, int limit, const std::vector<float>& yolo_scores) {
+    auto stage_start = Clock::now();
     int left = std::clamp(int(std::floor(box.x)), 0, image.cols);
     int top = std::clamp(int(std::floor(box.y)), 0, image.rows);
     int right = std::clamp(int(std::ceil(box.x + box.width)), 0, image.cols);
     int bottom = std::clamp(int(std::ceil(box.y + box.height)), 0, image.rows);
-    if (right - left < 2 || bottom - top < 2) return;
+    if (right - left < 2 || bottom - top < 2) { timings.add("photo_quality", stage_start); return; }
     // Detta är bara en vy in i bildrutan, inte en sparad kopia av produkten.
     cv::Mat product_area = image(cv::Rect(left, top, right - left, bottom - top));
     double scale = std::min(1.0, 384.0 / std::max(product_area.cols, product_area.rows));
@@ -25,11 +26,13 @@ void keep_product_photo(ProductTrack& track, const cv::Mat& image, const cv::Rec
     cv::meanStdDev(edges, average, deviation);
     double sharpness = deviation[0] * deviation[0];
     double quality = score * std::sqrt(grey.total()) * std::log1p(sharpness);
+    timings.add("photo_quality", stage_start);
+    stage_start = Clock::now();
     int replace_photo = -1;
 
     // Bilder inom 100ms räknas som samma och vi tar den bästa av de
     if (!track.photos.empty() && time - track.photos.back().time < 0.10) {
-        if (quality <= track.photos.back().quality) return;
+        if (quality <= track.photos.back().quality) { timings.add("photo_selection", stage_start); return; }
         replace_photo = int(track.photos.size()) - 1;
 
     } else if (int(track.photos.size()) >= limit) {
@@ -56,10 +59,12 @@ void keep_product_photo(ProductTrack& track, const cv::Mat& image, const cv::Rec
                 remove_photo = int(i);
             }
         }
-        if (remove_photo == int(track.photos.size())) return; // inge bra
+        if (remove_photo == int(track.photos.size())) { timings.add("photo_selection", stage_start); return; } // inge bra
         track.photos.erase(track.photos.begin() + remove_photo);
     }
 
+    timings.add("photo_selection", stage_start);
+    stage_start = Clock::now();
     // Nu har vi bestämt att bilden ska behållas och skapar då produktbilden till ViT.
     cv::Mat photo;
     if (scale < 1) cv::resize(product_area, photo, {}, scale, scale, cv::INTER_AREA);
@@ -67,6 +72,7 @@ void keep_product_photo(ProductTrack& track, const cv::Mat& image, const cv::Rec
     ProductPhoto candidate{quality, time, photo, yolo_scores};
     if (replace_photo >= 0) track.photos[replace_photo] = candidate;
     else track.photos.push_back(candidate);
+    timings.add("photo_save", stage_start);
 }
 
 // Används när spåret har produktbilder och vi vill veta vilken som blev tydligast.
