@@ -1,10 +1,13 @@
 #include "classifier.hpp"
 #include <ATen/Parallel.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <algorithm>
 
 // Modellfilen innehåller även klassnamn, så vi slipper hålla en separat ViT-lista uppdaterad.
 ImageModel::ImageModel(const fs::path& file, const std::string& expected_format) {
     at::set_num_threads(4);
+    // Kör modellens beräkningar direkt. CPU-fusionens kompilering kan fastna länge på Pi:n.
+    torch::jit::setTensorExprFuserEnabled(false);
     torch::jit::ExtraFilesMap extra_files{{"metadata.json", ""}};
     network = torch::jit::load(file.string(), torch::kCPU, extra_files);
     network.eval();
