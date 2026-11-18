@@ -78,13 +78,16 @@ class ClassifierProgram:
             subprocess.run(["ffmpeg", "-nostdin", "-y", "-v", "error", *arguments], stdout=log, stderr=log, check=True, timeout=600)
 
     # Förhandsvideo, poster och produktbilder skapas bara här, aldrig av C++-programmet.
-    def prepare_review(self, source, directory, result):
+    def prepare_review(self, source, directory, result, progress=None):
+        progress = progress or (lambda *_: None)
         source, directory = Path(source).resolve(), Path(directory).resolve()
         proxy = directory / "video.mp4"
+        progress(90, "Skapar förhandsvideo")
         if source != proxy:
             width = int(self.settings.get("preview_width", 1280))
             scale = f"scale=w='min({width},trunc(iw/2)*2)':h=-2"
             self.run_ffmpeg(["-i", str(source), "-map", "0:v:0", "-an", "-vf", scale, "-c:v", "libx264", "-preset", self.settings.get("preview_preset", "veryfast"), "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(proxy)], directory)
+        progress(92, "Skapar startbild")
         self.run_ffmpeg(["-i", str(proxy), "-frames:v", "1", str(directory / "poster.jpg")], directory)
         width, height = result["video"]["width"], result["video"]["height"]
         for number, track in enumerate(result["tracks"], start=1):
@@ -103,6 +106,7 @@ class ClassifierProgram:
                 continue
             # Filnamnet bygger på listans position. Även externa spår-ID:n kan då läsas utan att bli sökvägar.
             filename = f"track-{number}.jpg"
+            progress(93 + int(6 * number / len(result["tracks"])), f"Sparar produktbild {number} av {len(result['tracks'])}")
             crop = f"crop={right - left}:{bottom - top}:{left}:{top},scale=w='min(384,iw)':h=-2"
             self.run_ffmpeg(["-ss", str(best_time), "-i", str(source), "-frames:v", "1", "-vf", crop, str(directory / filename)], directory)
             track["crop_file"] = filename
@@ -128,7 +132,7 @@ class ClassifierProgram:
                 subprocess.run(command, stdout=log, stderr=log, check=True)
             result = json.loads(output.read_text())
             progress(90, "Förbereder visningen")
-            self.prepare_review(source, directory, result)
+            self.prepare_review(source, directory, result, progress=progress)
         finally:
             request.unlink(missing_ok=True)
             output.unlink(missing_ok=True)

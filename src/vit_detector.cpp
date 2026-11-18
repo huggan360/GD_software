@@ -1,6 +1,7 @@
 #include "classifier.hpp"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <numeric>
 
 // Bildförberedelsen finns inuti den exporterade ViT-modellen.
@@ -54,8 +55,11 @@ void classify_product_vit(ProductTrack& track, ImageModel& vit, const std::vecto
     std::vector<float> vit_scores(vit.class_names.size(), 0), yolo_scores(vit.class_names.size(), 0);
     bool combine = !class_order.empty();
     track.details["classification_views"] = Json::array();
+    int completed_photos = 0;
     for (const ProductPhoto& photo : track.photos) {
         std::vector<float> scores = vit.classify(photo.image); //------------------TILL VIT------------------------------
+        ++completed_photos;
+        std::cout << "ViT objekt " << track.details["id"].get<std::string>() << ": bild " << completed_photos << " av " << track.photos.size() << " klar." << std::endl;
         for (size_t i = 0; i < scores.size(); ++i) vit_scores[i] += scores[i] / track.photos.size();
         track.details["classification_views"].push_back(photo.time);
         if (!combine) continue;

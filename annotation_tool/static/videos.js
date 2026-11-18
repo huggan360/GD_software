@@ -80,7 +80,7 @@ async function refresh() {
   if (!$('upload-camera').options.length) {
     for (const camera of Object.keys(library.cameras)) $('upload-camera').append(new Option(camera, camera));
   }
-  const signature = JSON.stringify(library.items.map((item) => [item.id, item.status, item.progress, item.reviewed, item.movements]));
+  const signature = JSON.stringify(library.items.map((item) => [item.id, item.status, item.progress, item.message, item.processing, item.reviewed, item.movements]));
   if (signature !== state.signature) {
     state.signature = signature;
     renderList();
@@ -95,13 +95,15 @@ function renderList() {
   list.replaceChildren();
   if (!state.library.items.length) list.append(element('p', {class: 'queue-empty'}, 'No clips yet.'));
   for (const item of state.library.items) {
-    const status = item.status === 'done' ? `${item.movements ?? 0} movements` : item.status === 'failed' ? 'failed' : `${item.progress}%`;
+    const status = item.status === 'done' ? `${item.movements ?? 0} movements` : item.status === 'failed' ? 'failed' : item.processing ? `${item.processing.stage}: ${item.processing.message}` : item.message;
     const card = element('button', {class: `image-card${item.id === state.current ? ' active' : ''}`, onclick: () => openVideo(item.id)},
       element('div', {class: 'card-info'},
         element('div', {class: 'card-top'}, element('strong', {}, item.filename), element('span', {}, item.camera)),
         element('div', {class: 'card-bottom'}, `${status}${item.reviewed ? ', reviewed' : ''}, ${new Date(item.created * 1000).toLocaleString()}`)));
     if (item.status === 'running' || item.status === 'queued') {
-      card.append(element('div', {class: 'card-progress', style: `width:${item.progress}%`}));
+      const progress = item.processing;
+      const percent = progress?.total > 0 ? 100 * progress.completed / progress.total : item.progress;
+      card.append(element('div', {class: 'card-progress', style: `width:${percent}%`}));
     }
     list.append(card);
   }
@@ -134,7 +136,6 @@ async function openVideo(id) {
   const ready = state.detail.meta.status === 'done' && state.detail.result;
   $('video-empty').hidden = ready;
   $('video-frame').hidden = !ready;
-  $('video-empty').textContent = state.detail.meta.status === 'failed' ? state.detail.meta.message : 'Processing… the clip opens when the models are done.';
   if (ready) {
     const source = `/api/videos/${id}/files/video.mp4`;
     if (!$('player').src.endsWith(source)) $('player').src = source;
@@ -148,7 +149,13 @@ function renderHeading() {
   $('video-title').textContent = meta.filename;
   const info = result ? `, ${seconds(result.video.duration)}, ${result.video.width}×${result.video.height}` : '';
   $('video-meta').textContent = `${meta.camera} camera, event ${meta.event_id}${info}`;
-  $('video-state').textContent = meta.status === 'done' ? 'Ready' : `${meta.status}: ${meta.message}`;
+  const progress = meta.processing;
+  $('video-state').textContent = meta.status === 'done' ? 'Ready' : progress?.stage || meta.status;
+  $('processing-title').textContent = meta.status === 'failed' ? 'Körningen misslyckades' : meta.status === 'queued' ? 'Väntar i kö' : progress?.stage || 'Förbereder körningen';
+  $('processing-detail').textContent = progress?.message || meta.message;
+  $('processing-progress').hidden = meta.status !== 'running';
+  if (progress?.total > 0) $('processing-progress').value = 100 * progress.completed / progress.total;
+  else $('processing-progress').removeAttribute('value');
   const warnings = result ? result.warnings : [];
   $('video-warning').hidden = !warnings.length;
   $('video-warning').textContent = warnings.join(' ');

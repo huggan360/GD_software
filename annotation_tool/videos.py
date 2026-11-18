@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from annotation_tool.store import StoreError, category_name
 from annotation_tool.program import ClassifierProgram, load_config, movements, save_zones, write_json
 from annotation_tool.edge import import_edge_videos
+from annotation_tool.progress import read_progress
 from annotation_tool.zones import analyse_tracks
 
 VIDEO_ID = re.compile(r"[0-9a-f]{24}")
@@ -164,6 +165,7 @@ class VideoLibrary:
             if not VIDEO_ID.fullmatch(path.parent.name):
                 continue  # Half-published or temporary folders.
             meta = json.loads(path.read_text())
+            meta["processing"] = read_progress(path.parent, meta)
             result = path.parent / "result.json"
             if result.is_file():
                 document = json.loads(result.read_text())
@@ -208,7 +210,7 @@ class VideoLibrary:
                 source = folder / meta["original"]
                 edge_result = folder / ".edge-result.json"
                 if edge_result.is_file():
-                    self.program.prepare_review(source, folder, json.loads(edge_result.read_text()))
+                    self.program.prepare_review(source, folder, json.loads(edge_result.read_text()), progress=lambda value, text: self.update(meta["id"], progress=value, message=text))
                 else:
                     self.program.run(source, folder, meta["camera"], self.config["cameras"][meta["camera"]], meta["event_id"], progress=lambda value, text: self.update(meta["id"], progress=value, message=text))
                 self.update(
@@ -370,6 +372,7 @@ def add_video_routes(app, settings, store):
     def video_detail(video_id: str):
         folder = library.folder(video_id)
         value = {"meta": library.meta(video_id)}
+        value["meta"]["processing"] = read_progress(folder, value["meta"])
         for name in ("result", "review"):
             path = folder / f"{name}.json"
             value[name] = json.loads(path.read_text()) if path.is_file() else None

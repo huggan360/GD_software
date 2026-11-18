@@ -62,7 +62,10 @@ kbd { font: 11px monospace; margin-left: 5px; color: #777; }
 #zoom-label { min-width: 32px; text-align: center; font-size: 11px; }
 .canvas-viewport { flex: 1; min-height: 200px; overflow: auto; background: #eee; padding: 24px; align-content: center; text-align: center; }
 canvas { display: block; margin: auto; touch-action: none; max-width: none; background: white; }
-.empty-editor { padding: 20px; }
+.empty-editor { padding: 20px; text-align: center; max-width: 100%; overflow-wrap: anywhere; }
+#processing-title { display: block; font-size: 18px; }
+#processing-detail { margin: 12px 0; white-space: pre-line; }
+#processing-progress { display: block; width: 320px; max-width: 100%; height: 14px; margin: auto; accent-color: #386b9b; }
 .editor-footer { padding: 6px 10px; border-top: 1px solid #ccc; display: flex; justify-content: flex-end; }
 .editor-footer button { font-size: 12px; }
 .inspector { border-left: 1px solid #ccc; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; }

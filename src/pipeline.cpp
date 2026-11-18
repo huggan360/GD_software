@@ -1,5 +1,6 @@
 #include "classifier.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <opencv2/imgproc.hpp>
@@ -47,6 +48,7 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
     std::string started = current_time();
     cv::Mat frame;
     int frame_number = 0;
+    auto last_progress = std::chrono::steady_clock::now();
 
 
     while (video.read(frame)) {
@@ -94,8 +96,12 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
             if (matches[i] >= 0) yolo_scores = product_boxes[matches[i]].class_scores;
             keep_product_photo(product, rgb, box, tracked->getScore(), time, photo_count, yolo_scores);
         }
-        // Skriver hur långt vi kommit ungefär var tionde sekund av videon.
-        if (current_frame % std::max(1, int(fps * 10)) < step) std::cout << "YOLO och spårning: " << frame_number << " av " << expected_frames << " bildrutor." << std::endl;
+        // Uppdaterar bildruteräknaren ungefär en gång per sekund medan programmet arbetar.
+        auto now = std::chrono::steady_clock::now();
+        if (current_frame == 0 || now - last_progress >= std::chrono::seconds(1)) {
+            std::cout << "YOLO och spårning: " << frame_number << " av " << expected_frames << " bildrutor." << std::endl;
+            last_progress = now;
+        }
     }
 
     std::cout << "YOLO och spårning är klara för " << frame_number << " bildrutor." << std::endl;

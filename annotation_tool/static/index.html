@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Review</title>
-  <link rel="stylesheet" href="/static/style.css?v=8">
-  <script src="/static/videos.js?v=7" defer></script>
+  <link rel="stylesheet" href="/static/style.css?v=9">
+  <script src="/static/videos.js?v=8" defer></script>
 </head>
 <body>
   <!-- ---------------------------------------------------- -->
@@ -42,7 +42,11 @@
       </div>
       <p id="ignored-area-info" class="ignored-area-note">Högra 300 px hoppas alltid över av YOLO. Gränsen är fast.</p>
       <div class="video-stage" id="video-stage">
-        <div id="video-empty" class="empty-editor">Upload a clip or read one from edge.</div>
+        <div id="video-empty" class="empty-editor" role="status">
+          <strong id="processing-title">Upload a clip or read one from edge.</strong>
+          <p id="processing-detail"></p>
+          <progress id="processing-progress" max="100" hidden></progress>
+        </div>
         <div id="video-frame" class="video-frame" hidden>
           <video id="player" controls playsinline muted></video>
           <canvas id="overlay" aria-label="Spår, zoner och fast undantaget område till höger"></canvas>
