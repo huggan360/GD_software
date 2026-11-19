@@ -4,10 +4,11 @@
 const $ = (id) => document.getElementById(id);
 const state = {
   token: sessionStorage.getItem('fridge-token'), name: sessionStorage.getItem('fridge-name'),
-  library: null, current: null, detail: null, zones: null, zoneTool: null, drag: null,
+  library: null, current: null, detail: null,
   selected: null, signature: '',
 };
-const ZONE_COLORS = {inside: '#2b9a48', outside: '#e07b20'};
+// Samma fasta mått som i program.hpp.
+const IGNORE_RIGHT_PIXELS = 450, BORDER_ZONE_PIXELS = 100;
 
 async function api(path, method = 'GET', body = undefined) {
   const headers = {};
@@ -129,8 +130,6 @@ async function openVideo(id) {
   state.current = id;
   state.selected = null;
   state.detail = await api(`/api/videos/${id}`);
-  const camera = state.detail.meta.camera;
-  state.zones = structuredClone(state.library.cameras[camera]);
   renderList();
   renderHeading();
   const ready = state.detail.meta.status === 'done' && state.detail.result;
@@ -159,7 +158,7 @@ function renderHeading() {
   const warnings = result ? result.warnings : [];
   $('video-warning').hidden = !warnings.length;
   $('video-warning').textContent = warnings.join(' ');
-  $('ignored-area-info').textContent = 'YOLO hoppar över högra 300 px av originalbilden. Gränsen är fast.';
+  $('ignored-area-info').textContent = `Högra ${IGNORE_RIGHT_PIXELS} px ignoreras. De ${BORDER_ZONE_PIXELS} px direkt till vänster är gränszonen och räknas som inne.`;
 }
 
 // ---------------------------------------------------------
@@ -220,6 +219,7 @@ function renderInspector() {
       element('div', {class: 'object-details'},
         element('strong', {}, `#${track.id}`),
         element('div', {class: 'muted'}, `${seconds(start)}–${seconds(end)}`),
+        element('div', {class: 'muted'}, track.inside == null ? '' : `Slutläge: ${track.inside ? 'Inne' : 'Ute'}`),
         modelPredictions('ViT top 3', vitPredictions),
         modelPredictions('YOLO top 3', track.yolo_top_categories),
         element('div', {class: 'object-decision'}, element('strong', {}, 'Decision'), element('div', {}, decision)),
@@ -255,7 +255,7 @@ $('save-review').addEventListener('click', async () => {
 function drawIgnoredArea(context, pictureBox) {
   const result = state.detail?.result;
   if (!result) return;
-  const ignored = {box: [Math.max(0, (result.video.width - 300) / result.video.width), 0, 1, 1]};
+  const ignored = {box: [Math.max(0, (result.video.width - IGNORE_RIGHT_PIXELS) / result.video.width), 0, 1, 1]};
   const [x, y, width, height] = pictureBox(ignored.box);
   context.save();
   context.beginPath();
@@ -271,7 +271,7 @@ function drawIgnoredArea(context, pictureBox) {
     context.stroke();
   }
   context.fillStyle = '#812020';
-  context.fillText('YOLO ignorerar området', x + 8, y + 20);
+  context.fillText('Inne: ignoreras av YOLO', x + 8, y + 20);
   context.restore();
 }
 
@@ -289,28 +289,23 @@ function draw() {
   const pictureWidth = video.videoWidth * scale, pictureHeight = video.videoHeight * scale;
   const left = (width - pictureWidth) / 2, top = (video.clientHeight - pictureHeight) / 2;
   const box = ([x1, y1, x2, y2]) => [left + x1 * pictureWidth, top + y1 * pictureHeight, (x2 - x1) * pictureWidth, (y2 - y1) * pictureHeight];
-  state.frame = {left, top, pictureWidth, pictureHeight};
   const context = canvas.getContext('2d');
   context.clearRect(0, 0, width, height);
   context.lineWidth = 2;
   context.font = '12px Arial';
   drawIgnoredArea(context, box);
-  for (const [name, rect] of Object.entries(state.zones || {})) {
-    if (!rect) continue;
-    context.strokeStyle = ZONE_COLORS[name];
-    context.setLineDash([6, 4]);
-    context.strokeRect(...box(rect));
-    context.setLineDash([]);
-    context.fillStyle = ZONE_COLORS[name];
-    const [x, y] = box(rect);
-    context.fillText(name, x + 4, y + 14);
-  }
-  if (state.drag) {
-    context.strokeStyle = ZONE_COLORS[state.zoneTool];
-    context.strokeRect(state.drag.x, state.drag.y, state.drag.w, state.drag.h);
-  }
   const result = state.detail?.result;
   if (!result) return;
+  const originalWidth = result.video.width;
+  const border = Math.max(0, (originalWidth - IGNORE_RIGHT_PIXELS - BORDER_ZONE_PIXELS) / originalWidth);
+  const inside = Math.max(0, (originalWidth - IGNORE_RIGHT_PIXELS) / originalWidth);
+  context.fillStyle = 'rgba(224, 123, 32, 0.12)';
+  context.fillRect(...box([0, 0, border, 1]));
+  context.fillStyle = 'rgba(43, 154, 72, 0.20)';
+  context.fillRect(...box([border, 0, inside, 1]));
+  context.fillStyle = '#222';
+  context.fillText('Ute', left + 4, top + 14);
+  context.fillText('Gränszon = inne', left + border * pictureWidth + 4, top + 14);
   const window = 1 / (result.sample_fps || result.video.fps || 25);
   const now = video.currentTime;
   for (const track of result.tracks) {
@@ -336,55 +331,6 @@ $('player').addEventListener('loadedmetadata', draw);
 $('show-all').addEventListener('change', draw);
 window.addEventListener('resize', draw);
 (function animate() { if (!$('player').paused) draw(); requestAnimationFrame(animate); })();
-
-// ---------------------------------------------------------
-// DRAW AND SAVE INSIDE / OUTSIDE ZONES FOR THIS CAMERA
-// ---------------------------------------------------------
-function chooseZone(name) {
-  state.zoneTool = state.zoneTool === name ? null : name;
-  $('zone-inside').classList.toggle('active', state.zoneTool === 'inside');
-  $('zone-outside').classList.toggle('active', state.zoneTool === 'outside');
-  $('overlay').classList.toggle('drawing', !!state.zoneTool);
-  if (state.zoneTool) $('player').pause();
-}
-$('zone-inside').addEventListener('click', () => chooseZone('inside'));
-$('zone-outside').addEventListener('click', () => chooseZone('outside'));
-$('zone-clear').addEventListener('click', () => { if (state.zones) { state.zones = {inside: null, outside: null}; draw(); } });
-
-$('overlay').addEventListener('pointerdown', (event) => {
-  if (!state.zoneTool) return;
-  state.drag = {x0: event.offsetX, y0: event.offsetY, x: event.offsetX, y: event.offsetY, w: 0, h: 0};
-  $('overlay').setPointerCapture(event.pointerId);
-});
-$('overlay').addEventListener('pointermove', (event) => {
-  if (!state.drag) return;
-  const drag = state.drag;
-  drag.x = Math.min(drag.x0, event.offsetX); drag.y = Math.min(drag.y0, event.offsetY);
-  drag.w = Math.abs(event.offsetX - drag.x0); drag.h = Math.abs(event.offsetY - drag.y0);
-  draw();
-});
-$('overlay').addEventListener('pointerup', () => {
-  const drag = state.drag, frame = state.frame;
-  state.drag = null;
-  if (!drag || drag.w < 5 || drag.h < 5) { draw(); return; }
-  const clamp = (value) => Math.max(0, Math.min(1, value));
-  state.zones[state.zoneTool] = [clamp((drag.x - frame.left) / frame.pictureWidth), clamp((drag.y - frame.top) / frame.pictureHeight),
-    clamp((drag.x + drag.w - frame.left) / frame.pictureWidth), clamp((drag.y + drag.h - frame.top) / frame.pictureHeight)].map((v) => Math.round(v * 1000) / 1000);
-  chooseZone(state.zoneTool);
-  draw();
-});
-
-$('zone-save').addEventListener('click', async () => {
-  if (!state.detail) return;
-  const camera = state.detail.meta.camera;
-  try {
-    state.library.cameras[camera] = await api(`/api/zones/${camera}`, 'PUT', state.zones);
-    if (state.detail.result) state.detail.result = await api(`/api/videos/${state.current}/reanalyse`, 'POST');
-    toast(`Zones saved for the ${camera} camera; production uses them too.`);
-    renderHeading(); renderInspector(); draw();
-    state.signature = ''; refresh();
-  } catch (error) { toast(error.message, true); }
-});
 
 $('rerun-button').addEventListener('click', async () => {
   if (!state.current) return;

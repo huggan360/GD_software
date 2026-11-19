@@ -9,7 +9,7 @@ std::vector<int> match_class_names(const std::vector<std::string>& yolo_names, c
 
     std::map<std::string, int> yolo_index;
 
-    for (size_t i = 0; i < yolo_names.size(); ++i) yolo_index[yolo_names[i]] = int(i);
+    for (int i = 0; i < int(yolo_names.size()); ++i) yolo_index[yolo_names[i]] = i;
 
     if (yolo_index.size() != yolo_names.size()) return {};
 
@@ -28,9 +28,9 @@ std::vector<int> match_class_names(const std::vector<std::string>& yolo_names, c
 // Plockar ut de tre största poängen
 Json top_three(std::vector<float> scores, const std::vector<std::string>& names) {
     Json result = Json::array();
-    for (size_t position = 0; position < std::min(size_t(3), scores.size()); ++position) {
-        size_t best = 0;
-        for (size_t i = 1; i < scores.size(); ++i) if (scores[i] > scores[best]) best = i;
+    for (int position = 0; position < std::min(3, int(scores.size())); ++position) {
+        int best = 0;
+        for (int i = 1; i < int(scores.size()); ++i) if (scores[i] > scores[best]) best = i;
         result.push_back({{"category", names[best]}, {"confidence", scores[best]}});
         scores[best] = -1;
     }
@@ -44,7 +44,7 @@ void save_yolo_predictions(ProductTrack& track, const std::vector<std::string>& 
     int photos = 0;
     for (const ProductPhoto& photo : track.photos) {
         if (photo.yolo_scores.size() != scores.size()) continue;
-        for (size_t i = 0; i < scores.size(); ++i) scores[i] += photo.yolo_scores[i];
+        for (int i = 0; i < int(scores.size()); ++i) scores[i] += photo.yolo_scores[i];
         ++photos;
     }
     track.details["yolo_top_categories"] = Json::array();
@@ -63,17 +63,17 @@ void decide_product(ProductTrack& track, VitClassifier& vit, const std::vector<i
         auto image_start = Clock::now();
         std::vector<float> scores = vit.classify(photo.image); //------------------TILL VIT------------------------------
         timings.add("vit_image_total", image_start);
-        for (size_t i = 0; i < scores.size(); ++i) vit_scores[i] += scores[i] / track.photos.size();
+        for (int i = 0; i < int(scores.size()); ++i) vit_scores[i] += scores[i] / track.photos.size();
         if (!combine) continue;
         if (photo.yolo_scores.size() != class_order.size()) { combine = false; continue; }
         float total = std::accumulate(photo.yolo_scores.begin(), photo.yolo_scores.end(), 0.0f);
         if (!std::isfinite(total) || total <= 0) { combine = false; continue; }
-        for (size_t i = 0; i < yolo_scores.size(); ++i) yolo_scores[i] += photo.yolo_scores[class_order[i]] / total / track.photos.size();
+        for (int i = 0; i < int(yolo_scores.size()); ++i) yolo_scores[i] += photo.yolo_scores[class_order[i]] / total / track.photos.size();
     }
     auto decision_start = Clock::now();
     std::vector<float> final_scores = vit_scores;
     if (combine) {
-        for (size_t i = 0; i < final_scores.size(); ++i) final_scores[i] = vit_weight * vit_scores[i] + (1 - vit_weight) * yolo_scores[i];
+        for (int i = 0; i < int(final_scores.size()); ++i) final_scores[i] = vit_weight * vit_scores[i] + (1 - vit_weight) * yolo_scores[i];
     }
     track.details["vit_top_categories"] = top_three(vit_scores, vit.class_names);
     Json best = top_three(final_scores, vit.class_names)[0];

@@ -35,7 +35,7 @@ struct HailoRequest {
     hailort::AsyncInferJob job;
 };
 
-std::shared_ptr<uint8_t> allocate_hailo_buffer(size_t bytes) {
+std::shared_ptr<uint8_t> allocate_hailo_buffer(int bytes) {
     void* address = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (address == MAP_FAILED) throw std::bad_alloc();
     return std::shared_ptr<uint8_t>(static_cast<uint8_t*>(address), [bytes](uint8_t* buffer) { munmap(buffer, bytes); });
@@ -93,13 +93,13 @@ YoloClassifier::YoloClassifier(const Settings& settings) {
     network = model->configure().expect("Kan inte förbereda Hailos asynkrona bildflöde.");
     status = network.activate();
     if (status != HAILO_SUCCESS) throw std::runtime_error("Kan inte aktivera Hailo-nätverket.");
-    queue_size = std::min(size_t(3), network.get_async_queue_size().expect("Kan inte läsa Hailos köstorlek."));
+    queue_size = std::min(3, int(network.get_async_queue_size().expect("Kan inte läsa Hailos köstorlek.")));
     if (queue_size == 0) throw std::runtime_error("Hailos bildkö saknar lediga platser.");
 
-    for (size_t i = 0; i < queue_size; ++i) {
+    for (int i = 0; i < queue_size; ++i) {
         auto request = std::make_unique<HailoRequest>();
         request->bindings = std::make_unique<ConfiguredInferModel::Bindings>(network.create_bindings().expect("Kan inte koppla bildbuffertarna."));
-        size_t bytes = model->input(input_name).expect("Bildingången saknas.").get_frame_size();
+        int bytes = model->input(input_name).expect("Bildingången saknas.").get_frame_size();
         request->input_buffer = allocate_hailo_buffer(bytes);
         request->mappings.push_back(DmaMappedBuffer::create(*device, request->input_buffer.get(), bytes, HAILO_DMA_BUFFER_DIRECTION_H2D).expect("Kan inte mappa bildbufferten."));
         status = request->bindings->input(input_name).expect("Bildingången saknas.").set_buffer(MemoryView(request->input_buffer.get(), bytes));
@@ -178,21 +178,21 @@ std::vector<Detection> YoloClassifier::receive() {
         const float* box_values = reinterpret_cast<const float*>(request.output_buffers.at(box_output.name).get());
         const float* class_values = reinterpret_cast<const float*>(request.output_buffers.at(class_output->name).get());
         bool needs_sigmoid = false;
-        size_t class_values_count = size_t(class_output->shape.height) * class_output->shape.width * class_names.size();
-        for (size_t i = 0; i < class_values_count; ++i) if (class_values[i] < 0 || class_values[i] > 1) needs_sigmoid = true;
+        int class_values_count = int(class_output->shape.height) * int(class_output->shape.width) * int(class_names.size());
+        for (int i = 0; i < class_values_count; ++i) if (class_values[i] < 0 || class_values[i] > 1) needs_sigmoid = true;
 
-        for (unsigned y = 0; y < box_output.shape.height; ++y) {
-            for (unsigned x = 0; x < box_output.shape.width; ++x) {
-                size_t cell = y * box_output.shape.width + x;
+        for (int y = 0; y < int(box_output.shape.height); ++y) {
+            for (int x = 0; x < int(box_output.shape.width); ++x) {
+                int cell = y * box_output.shape.width + x;
                 Detection detection;
                 detection.score = 0;
                 detection.label = 0;
                 detection.class_scores.resize(class_names.size());
-                for (size_t label = 0; label < class_names.size(); ++label) {
+                for (int label = 0; label < int(class_names.size()); ++label) {
                     float score = class_values[cell * class_names.size() + label];
                     if (needs_sigmoid) score = 1.0f / (1.0f + std::exp(-score));
                     detection.class_scores[label] = score;
-                    if (score > detection.score) { detection.score = score; detection.label = int(label); }
+                    if (score > detection.score) { detection.score = score; detection.label = label; }
                 }
                 if (detection.score < minimum_score) continue;
                 const float* edges = box_values + cell * 4;

@@ -8,7 +8,7 @@
 Json process_video(const RunOptions& options, const Settings& settings) {
 
 //-------------------
-// Steg A: Läs begäran och kamerans inställningar
+// A: läs in inställningar och ta emot json från orkestrator
 //-------------------
 
 
@@ -24,11 +24,10 @@ Json process_video(const RunOptions& options, const Settings& settings) {
     double offset = request.value("offset_seconds", 0.0);
 
     YAML::Node config = settings.values, tracking = config["tracking"];
-    Json zones = read_zones(config["cameras"][camera]);
 
 
 //-------------------
-// Steg B: Öppna videon och bestäm vilka bildrutor som ska analyseras
+// B: Öppna videon och bestäm vilka bildrutor som ska analyseras
 //-------------------
 
     stage_start = Clock::now();
@@ -38,7 +37,6 @@ Json process_video(const RunOptions& options, const Settings& settings) {
     if (fps <= 0 || width <= IGNORE_RIGHT_PIXELS || height <= 0) throw std::runtime_error("Kan inte läsa videon.");
     timings.add("video_open", stage_start);
 
-    int photo_count = std::clamp(config["classifier"]["crops_per_track"].as<int>(5), 1, 5); //antal bilder vi ska ta ut (ändras i config)
 
     int visible_width = width - IGNORE_RIGHT_PIXELS; //ta bort insidan av kylskåp
 
@@ -71,7 +69,7 @@ Json process_video(const RunOptions& options, const Settings& settings) {
 //-------------------
 
         // Fyll bara de lediga platserna. En full kö väntar; den kastar aldrig bort bildrutor.
-        while (!video_finished && frames.size() < yolo.queue_size) {
+        while (!video_finished && int(frames.size()) < yolo.queue_size) {
             auto frame_start = Clock::now();
             bool has_frame = video.read(frame);
             if (!has_frame) { timings.add("video_eof", frame_start); video_finished = true; break; }
@@ -101,7 +99,11 @@ Json process_video(const RunOptions& options, const Settings& settings) {
 // Steg F: Behåll tydliga produktbilder från olika tidpunkter till ViT
 //-------------------
 
-        for (const TrackedObject& object : objects) keep_product_photo(products[object.id], rgb, object.box, object.score, time, photo_count, object.yolo_scores);
+        for (const TrackedObject& object : objects) {
+            ProductTrack& product = products[object.id];
+            // Koppla YOLO-poängen till bilden bara om den sparades.
+            if (keep_product_photo(product, rgb, object.box, time)) product.photos.back().yolo_scores = object.yolo_scores;
+        }
 
         timings.add("frame_latency", current.started);
     }
@@ -120,7 +122,7 @@ Json process_video(const RunOptions& options, const Settings& settings) {
     for (auto& item : products) {
         ProductTrack& product = item.second;
         stage_start = Clock::now();
-        find_movements(product, zones, tracking, offset);
+        find_movements(product, width, offset);
         double movement = track_movement(product.observations);
         timings.add("zones_movement", stage_start);
         save_yolo_predictions(product, yolo.class_names);

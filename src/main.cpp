@@ -40,17 +40,9 @@ Settings load_settings(const RunOptions& options) {
     settings.vit_file = settings.model_folder / config["classifier"]["checkpoint"].as<std::string>();
     settings.yolo_file = settings.model_folder / config["detector"]["hef"].as<std::string>();
     settings.label_file = settings.model_folder / config["detector"]["hef_labels"].as<std::string>("yolo/classes.txt");
-    settings.zones_file = std::filesystem::absolute(config_folder / config["zones_file"].as<std::string>());
     settings.vit_weight = config["classifier"]["vit_weight"].as<float>(0.7f);
     if (!std::isfinite(settings.vit_weight) || settings.vit_weight < 0 || settings.vit_weight > 1) throw std::runtime_error("vit_weight ska ligga mellan 0 och 1.");
 
-    if (std::filesystem::is_regular_file(settings.zones_file)) {
-        Json zones = read_json(settings.zones_file);
-        for (const auto& camera : zones.items()) {
-            if (!config["cameras"][camera.key()]) continue;
-            for (const auto& zone : camera.value().items()) config["cameras"][camera.key()][zone.key()] = YAML::Load(zone.value().dump());
-        }
-    }
     return settings;
 }
 
@@ -145,7 +137,7 @@ int main(int count, char** arguments) {
         timings.add("pipeline_total", start);
 
         //---------------------------------------------
-        //3: Spara resultatet och printa -tidsmätningarna
+        //3: Spara resultatet och printa tidsmätningar
         //--------------------------------------------
 
         start = Clock::now();

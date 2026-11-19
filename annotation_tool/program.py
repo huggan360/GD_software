@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
-from annotation_tool.zones import validate_zones
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,43 +25,13 @@ def load_config(path, models_dir=None):
     path = Path(path).resolve()
     config = yaml.safe_load(path.read_text())
     config["config_path"] = str(path)
-    config["zones_file"] = str((path.parent / config["zones_file"]).resolve())
     model_folder = Path(models_dir).resolve() if models_dir else (path.parent / config["models_directory"]).resolve()
     config["models_directory"] = str(model_folder)
     for section, keys in (("detector", ("hef", "hef_labels")), ("classifier", ("checkpoint",))):
         for key in keys:
             if config[section].get(key):
                 config[section][key] = str(model_folder / config[section][key])
-    zones_file = Path(config["zones_file"])
-    if zones_file.is_file():
-        for camera, zones in json.loads(zones_file.read_text()).items():
-            if camera in config["cameras"]:
-                config["cameras"][camera].update(zones)
     return config
-
-
-# Zonfilen är vanlig kamerakonfiguration som även kan skrivas av andra program.
-def save_zones(config, camera, zones):
-    if camera not in config["cameras"]:
-        raise ValueError("Okänd kamera.")
-    zones = validate_zones(zones)
-    path = Path(config["zones_file"])
-    saved = json.loads(path.read_text()) if path.is_file() else {}
-    saved[camera] = zones
-    write_json(path, saved)
-    config["cameras"][camera].update(zones)
-    return zones
-
-
-# Bygger rörelselistan igen efter att användaren ritat om zonerna.
-def movements(tracks):
-    rows = []
-    for track in tracks:
-        if track.get("ignored"):
-            continue
-        for event in track["events"]:
-            rows.append({"track_id": track["id"], "direction": event["direction"], "category": track["category"], "classification_confidence": track["classification_confidence"], "start": event["event_start"], "end": event["event_end"]})
-    return sorted(rows, key=lambda row: row["start"])
 
 
 class ClassifierProgram:
@@ -87,7 +56,6 @@ class ClassifierProgram:
             numerator, denominator = map(int, stream["avg_frame_rate"].split("/"))
             result["video"] = {"width": stream["width"], "height": stream["height"], "fps": numerator / denominator if denominator else 0, "duration": float(probe["format"].get("duration", 0))}
         result.setdefault("warnings", [])
-        result["zones"] = self.config["cameras"][result["camera"]]
         proxy = directory / "video.mp4"
         progress(90, "Skapar förhandsvideo")
         if source != proxy:
@@ -125,11 +93,10 @@ class ClassifierProgram:
         return result
 
     # En vanlig JSON-begäran räcker för att köra klassificeraren. Ingen annoteringskod laddas av C++.
-    def run(self, source, directory, camera, zones, event_id, offset=0.0, progress=None):
+    def run(self, source, directory, camera, event_id, offset=0.0, progress=None):
         progress = progress or (lambda *_: None)
         source, directory = Path(source).resolve(), Path(directory).resolve()
         directory.mkdir(parents=True, exist_ok=True)
-        validate_zones(zones)
         request, output = directory / ".request.json", directory / ".program-result.json"
         output.unlink(missing_ok=True)
         capture_id = secrets.token_hex(12)

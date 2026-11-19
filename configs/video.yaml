@@ -1,6 +1,5 @@
 # Inställningar för C++-programmets modellkörning.
 models_directory: ..
-zones_file: ../data/zones.json
 
 detector:
   hef: yolo/yolo.hef
@@ -11,19 +10,12 @@ detector:
 classifier:
   checkpoint: vit/vit.pth  # Exported by GD_vision/compile/export.py; labels are inside.
   confidence: 0.0
-  crops_per_track: 5
   vit_weight: 0.7
 tracking:
-  stable_frames: 2
-  dwell_seconds: 0.2
   max_gap_seconds: 1.0
   minimum_movement: 0.03
 video:
   max_upload_mb: 1024
 cameras:
-  fridge:
-    inside: null
-    outside: null
-  door:
-    inside: null
-    outside: null
+  fridge: {}
+  door: {}

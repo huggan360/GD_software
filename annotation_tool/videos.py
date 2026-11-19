@@ -14,10 +14,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from annotation_tool.store import StoreError, category_name
-from annotation_tool.program import ClassifierProgram, load_config, movements, save_zones, write_json
+from annotation_tool.program import ClassifierProgram, load_config, write_json
 from annotation_tool.edge import import_edge_videos
 from annotation_tool.progress import read_progress
-from annotation_tool.zones import analyse_tracks
 
 VIDEO_ID = re.compile(r"[0-9a-f]{24}")
 EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".h264", ".m4v"}
@@ -26,11 +25,6 @@ EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".h264", ".m4v"}
 # ---------------------
 # API request fields
 # ---------------------
-class ZonesRequest(BaseModel):
-    inside: list[float] | None
-    outside: list[float] | None
-
-
 class ReviewRequest(BaseModel):
     tracks: dict[str, dict]
     notes: str = Field(default="", max_length=4000)
@@ -212,7 +206,7 @@ class VideoLibrary:
                 if edge_result.is_file():
                     self.program.prepare_review(source, folder, json.loads(edge_result.read_text()), progress=lambda value, text: self.update(meta["id"], progress=value, message=text))
                 else:
-                    self.program.run(source, folder, meta["camera"], self.config["cameras"][meta["camera"]], meta["event_id"], progress=lambda value, text: self.update(meta["id"], progress=value, message=text))
+                    self.program.run(source, folder, meta["camera"], meta["event_id"], progress=lambda value, text: self.update(meta["id"], progress=value, message=text))
                 self.update(
                     meta["id"],
                     status="done",
@@ -258,37 +252,6 @@ class VideoLibrary:
             raise StoreError("No reviewed, labelled tracks to export yet.", 409)
         return Path(handle.name)
 
-    # ---------------------
-    # ZONES CAN BE REDRAWN WITHOUT RUNNING THE MODELS AGAIN
-    # ---------------------
-    def reanalyse(self, video_id):
-        folder = self.folder(video_id)
-        path = folder / "result.json"
-        if not path.is_file():
-            raise StoreError("This clip has no result yet.", 409)
-        result = json.loads(path.read_text())
-        zones = self.config["cameras"][result["camera"]]
-        if any("observations" not in track for track in result["tracks"]):
-            result.update(zones=zones, warnings=["Zonerna är ändrade. Kör Run models again för att räkna om passagerna."])
-            write_json(path, result)
-            return result
-        tracks = analyse_tracks(result["tracks"], zones, self.config["tracking"])
-        for track in tracks:
-            for event in track["events"]:
-                event["event_start"] = result["offset_seconds"] + event["start"]
-                event["event_end"] = result["offset_seconds"] + event["end"]
-        # Behåll modellernas varningar när endast zonerna räknas om.
-        warnings = [message for message in result.get("warnings", []) if not message.startswith(("Rita både", "Set both zones"))]
-        if not all(zones.values()):
-            warnings.append("Rita både insida och utsida innan in- och utpassager kan räknas.")
-        result.update(
-            zones=zones,
-            tracks=tracks,
-            movements=movements(tracks),
-            warnings=warnings,
-        )
-        write_json(path, result)
-        return result
 
 
 # ---------------------
@@ -389,19 +352,6 @@ def add_video_routes(app, settings, store):
         if not path.is_file():
             raise StoreError("File not found.", 404)
         return FileResponse(path)
-
-    @app.put("/api/zones/{camera}")
-    def put_zones(camera: str, body: ZonesRequest, x_session: str = Header()):
-        editor(x_session)
-        try:
-            return save_zones(library.config, camera, body.model_dump())
-        except ValueError as error:
-            raise StoreError(str(error)) from error
-
-    @app.post("/api/videos/{video_id}/reanalyse")
-    def reanalyse(video_id: str, x_session: str = Header()):
-        editor(x_session)
-        return library.reanalyse(video_id)
 
     @app.post("/api/videos/{video_id}/rerun")
     def rerun(video_id: str, x_session: str = Header()):
