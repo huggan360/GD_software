@@ -22,7 +22,7 @@ cv::Mat resize_for_yolo(const cv::Mat& image, int width, int height, float& scal
 
 
 
-// Två identiska rutor ger 1. Rutor som inte möts ger 0.
+//
 float box_overlap(const cv::Rect2f& first, const cv::Rect2f& second) {
     float intersection = (first & second).area();
     float total_area = first.area() + second.area() - intersection;
@@ -30,9 +30,8 @@ float box_overlap(const cv::Rect2f& first, const cv::Rect2f& second) {
     return intersection / total_area;
 }
 
-// Högst poäng får välja först. En överlappande ruta av samma klass tas bort.
+// ta bort boxar som överlappar
 std::vector<Detection> remove_duplicate_boxes(std::vector<Detection> boxes, int limit) {
-    // Jämför två detektionspoäng för sorteringen.
     std::sort(boxes.begin(), boxes.end(), [](const Detection& first, const Detection& second) { return first.score > second.score; });
     std::vector<Detection> kept;
     for (const Detection& box : boxes) {
