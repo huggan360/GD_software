@@ -78,7 +78,8 @@ YoloClassifier::YoloClassifier(const Settings& settings) {
     model = device->create_infer_model(settings.yolo_file.string()).expect("Kan inte läsa YOLO:s HEF-fil.");
     auto inputs = model->hef().get_input_vstream_infos().expect("Kan inte läsa modellens bildingång.");
     outputs = model->hef().get_output_vstream_infos().expect("Kan inte läsa modellens utgångar.");
-    if (inputs.size() != 1 || outputs.size() != 6) throw std::runtime_error("Använd YOLO26-exporten med sex utgångar från GD_tracking.");
+    if (inputs.size() != 1 || (outputs.size() != 1 && outputs.size() != 6)) throw std::runtime_error("Använd YOLO11 eller YOLO26 från GD_tracking.");
+    if (outputs.size() == 1 && (outputs[0].format.order != HAILO_FORMAT_ORDER_HAILO_NMS_BY_CLASS || outputs[0].nms_shape.number_of_classes != class_names.size())) throw std::runtime_error("YOLO:s utgång stämmer inte med klassnamnen.");
     if (inputs[0].shape.features != 3) throw std::runtime_error("YOLO behöver RGB-bilder med tre färgkanaler.");
     input_name = inputs[0].name;
     width = inputs[0].shape.width;
@@ -88,7 +89,7 @@ YoloClassifier::YoloClassifier(const Settings& settings) {
     model->input(input_name).expect("Bildingången saknas.").set_format_order(HAILO_FORMAT_ORDER_NHWC);
     for (const auto& output : outputs) {
         model->output(output.name).expect("Modellutgången saknas.").set_format_type(HAILO_FORMAT_TYPE_FLOAT32);
-        model->output(output.name).expect("Modellutgången saknas.").set_format_order(HAILO_FORMAT_ORDER_NHWC);
+        model->output(output.name).expect("Modellutgången saknas.").set_format_order(outputs.size() == 1 ? HAILO_FORMAT_ORDER_HAILO_NMS_BY_CLASS : HAILO_FORMAT_ORDER_NHWC);
     }
     network = model->configure().expect("Kan inte förbereda Hailos asynkrona bildflöde.");
     status = network.activate();
@@ -165,7 +166,27 @@ std::vector<Detection> YoloClassifier::receive() {
     int left = request.left, top = request.top;
     stage_start = Clock::now();
     std::vector<Detection> detections;
-    for (const auto& box_output : outputs) {
+    if (outputs.size() == 1) {
+        // YOLO11 lämnar färdiga boxar: först antalet, sedan y1, x1, y2, x2 och poäng.
+        const float* values = reinterpret_cast<const float*>(request.output_buffers.at(outputs[0].name).get());
+        for (int label = 0; label < int(class_names.size()); ++label) {
+            int count = int(*values++);
+            for (int i = 0; i < count; ++i, values += 5) {
+                if (values[4] < minimum_score) continue;
+                float x1 = std::clamp((values[1] * width - left) / scale, 0.0f, float(request.image_width));
+                float y1 = std::clamp((values[0] * height - top) / scale, 0.0f, float(request.image_height));
+                float x2 = std::clamp((values[3] * width - left) / scale, 0.0f, float(request.image_width));
+                float y2 = std::clamp((values[2] * height - top) / scale, 0.0f, float(request.image_height));
+                Detection detection;
+                detection.box = {x1, y1, x2 - x1, y2 - y1};
+                detection.label = label;
+                detection.score = values[4];
+                detection.class_scores.resize(class_names.size(), 0);
+                detection.class_scores[label] = detection.score;
+                if (detection.box.area() > 0) detections.push_back(std::move(detection));
+            }
+        }
+    } else for (const auto& box_output : outputs) {
         bool is_class_output = std::find(class_outputs.begin(), class_outputs.end(), box_output.name) != class_outputs.end();
         if (box_output.shape.features != 4 || is_class_output) continue;
         const hailo_vstream_info_t* class_output = nullptr;
@@ -211,7 +232,8 @@ std::vector<Detection> YoloClassifier::receive() {
     next_receive = (next_receive + 1) % queue_size;
     --pending;
     stage_start = Clock::now();
-    detections = remove_duplicate_boxes(detections, max_detections);
+    if (outputs.size() == 6) detections = remove_duplicate_boxes(detections, max_detections);
+    else if (int(detections.size()) > max_detections) detections.resize(max_detections);
     timings.add("yolo_nms", stage_start);
     stage_start = Clock::now();
     std::vector<Detection> products;
