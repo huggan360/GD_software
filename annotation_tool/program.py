@@ -29,7 +29,7 @@ def load_config(path, models_dir=None):
     config["zones_file"] = str((path.parent / config["zones_file"]).resolve())
     model_folder = Path(models_dir).resolve() if models_dir else (path.parent / config["models_directory"]).resolve()
     config["models_directory"] = str(model_folder)
-    for section, keys in (("detector", ("weights", "hef", "hef_labels")), ("classifier", ("checkpoint",))):
+    for section, keys in (("detector", ("hef", "hef_labels")), ("classifier", ("checkpoint",))):
         for key in keys:
             if config[section].get(key):
                 config[section][key] = str(model_folder / config[section][key])

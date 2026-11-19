@@ -5,7 +5,7 @@
 #include <numeric>
 
 // Bildförberedelsen finns inuti den exporterade ViT-modellen.
-std::vector<float> ImageModel::classify(const cv::Mat& image) {
+std::vector<float> VitModel::classify(const cv::Mat& image) {
     auto stage_start = Clock::now();
     c10::InferenceMode inference;
     // Pixelpekaren lånas från OpenCV under modellkörningen; bilden äger fortfarande minnet.
@@ -62,7 +62,7 @@ Json top_three(std::vector<float> scores, const std::vector<std::string>& names)
 }
 
 // Bedömning med vit
-void classify_product_vit(ProductTrack& track, ImageModel& vit, const std::vector<int>& class_order, float vit_weight, float minimum_score) {
+void classify_product_vit(ProductTrack& track, VitModel& vit, const std::vector<int>& class_order, float vit_weight, float minimum_score) {
     std::vector<float> vit_scores(vit.class_names.size(), 0), yolo_scores(vit.class_names.size(), 0);
     bool combine = !class_order.empty();
     track.details["classification_views"] = Json::array();

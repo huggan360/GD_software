@@ -48,14 +48,8 @@ AppSettings load_settings(const RunOptions& options) {
     settings.model_folder = fs::absolute(config_folder / config["models_directory"].as<std::string>());
 
     if (!options.model_folder.empty()) settings.model_folder = fs::absolute(options.model_folder);
-    settings.backend = config["backend"].as<std::string>();
-
-    if (settings.backend != "hailo" && settings.backend != "torch") throw std::runtime_error("backend ska vara hailo eller torch.");
-
     settings.vit_file = settings.model_folder / config["classifier"]["checkpoint"].as<std::string>();
-    std::string yolo_key = "weights";
-    if (settings.backend == "hailo") yolo_key = "hef";
-    settings.yolo_file = settings.model_folder / config["detector"][yolo_key].as<std::string>();
+    settings.yolo_file = settings.model_folder / config["detector"]["hef"].as<std::string>();
     settings.label_file = settings.model_folder / config["detector"]["hef_labels"].as<std::string>("yolo/classes.txt");
     settings.zones_file = fs::absolute(config_folder / config["zones_file"].as<std::string>());
     settings.vit_weight = config["classifier"]["vit_weight"].as<float>(0.7f);

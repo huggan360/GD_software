@@ -1,13 +1,10 @@
 # Inställningar för C++-programmets modellkörning.
-backend: hailo
 models_directory: ..
 zones_file: ../data/zones.json
 
 detector:
-  weights: yolo/yolo.pth  # Optional compiled CPU model for local development.
   hef: yolo/yolo.hef
   hef_labels: yolo/classes.txt
-  image_size: 640
   confidence: 0.15
   max_detections: 100
   preprocessing: false

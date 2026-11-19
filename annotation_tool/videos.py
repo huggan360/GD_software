@@ -122,8 +122,8 @@ class VideoLibrary:
                 "editor": editor,
                 "created_at": time.time(),
                 "models": {
-                    "backend": self.config["backend"],
-                    "yolo": self.config["detector"].get("weights"),
+                    "backend": "hailo",
+                    "yolo": self.config["detector"]["hef"],
                     "vit": self.config["classifier"].get("checkpoint"),
                 },
             }

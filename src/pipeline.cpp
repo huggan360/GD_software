@@ -46,7 +46,7 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
 
     int lost_frames = std::max(1, int(std::ceil(tracking["max_gap_seconds"].as<double>() * sample_fps)));
     stage_start = Clock::now();
-    ProductDetector detector(settings);
+    HailoDetector detector(settings);
     timings.add("yolo_load", stage_start);
     stage_start = Clock::now();
     byte_track::BYTETracker tracker(30, lost_frames, 0.25f, 0.25f, 0.8f);
@@ -159,7 +159,8 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
     Json tracks = Json::array(), movements = Json::array(), warnings = Json::array();
 
 
-    std::unique_ptr<ImageModel> vit;
+    // Äger ViT-modellen och laddar den först när ett objekt behöver klassificeras.
+    std::unique_ptr<VitModel> vit;
     std::vector<int> class_order;
     for (auto& item : products) {
         ProductTrack& product = item.second;
@@ -188,7 +189,7 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
             if (!product.details["events"].empty() || movement >= tracking["minimum_movement"].as<double>()) {
                 if (!vit) {
                     stage_start = Clock::now();
-                    vit = std::make_unique<ImageModel>(settings.vit_file, "gd-vit-rgb-v1");
+                    vit = std::make_unique<VitModel>(settings.vit_file);
                     class_order = match_class_names(detector.class_names, vit->class_names);
                     if (class_order.empty() && detector.class_names.size() > 1) warnings.push_back("YOLO och ViT har olika listor så vi använder vit");
                     timings.add("vit_load", stage_start);
@@ -223,7 +224,7 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
     result["performance"] = {{"queue_size", detector.queue_size}, {"processed_frames", processed_frames}, {"frames_wall_ms", frames_ms}, {"average_frame_ms", processed_frames > 0 ? frames_ms / processed_frames : 0.0}, {"processed_fps", frames_ms > 0 ? processed_frames * 1000.0 / frames_ms : 0.0}};
     result["zones"] = zones;
     result["tracking_settings"] = {{"sample_fps", requested_fps}, {"stable_frames", tracking["stable_frames"].as<int>()}, {"dwell_seconds", tracking["dwell_seconds"].as<double>()}, {"max_gap_seconds", tracking["max_gap_seconds"].as<double>()}, {"minimum_movement", tracking["minimum_movement"].as<double>()}, {"max_tracks", tracking["max_tracks"].as<int>()}};
-    result["backend"] = settings.backend;
+    result["backend"] = "hailo";
     result["models"] = {{"yolo", settings.yolo_file.string()}, {"vit", settings.vit_file.string()}};
     result["ignored_region"] = {{"right_pixels", IGNORE_RIGHT_PIXELS}, {"box", {double(visible_width) / width, 0.0, 1.0, 1.0}}};
     result["tracks"] = tracks;

@@ -33,7 +33,7 @@ add_library(gd_bytetrack STATIC ${bytetrack_SOURCE_DIR}/src/BYTETracker.cpp ${by
 target_include_directories(gd_bytetrack PUBLIC ${bytetrack_SOURCE_DIR}/include)
 target_link_libraries(gd_bytetrack PUBLIC Eigen3::Eigen)
 
-# Modellkörningen använder CPU-biblioteken från LibTorch eller den installerade torch-paketmappen.
+# ViT använder CPU-biblioteken från LibTorch eller den installerade torch-paketmappen.
 set(TORCH_ROOT "" CACHE PATH "LibTorch directory containing include/ and lib/")
 find_path(TORCH_INCLUDE torch/script.h HINTS ${TORCH_ROOT}/include REQUIRED)
 find_library(TORCH_CPU torch_cpu HINTS ${TORCH_ROOT}/lib REQUIRED)
@@ -47,13 +47,9 @@ target_compile_options(gd_classifier PRIVATE -Wall -Wextra)
 get_filename_component(TORCH_LIBRARY_DIR ${TORCH_CPU} DIRECTORY)
 set_target_properties(gd_classifier PROPERTIES BUILD_RPATH "${TORCH_LIBRARY_DIR}")
 
-# Pi-bygget använder Hailo. Lägg till -DGD_HAILO=OFF för ett CPU-bygge på datorn.
-option(GD_HAILO "Build Hailo-8 inference" ON)
-if(GD_HAILO)
-    find_path(HAILO_INCLUDE hailo/hailort.hpp REQUIRED)
-    find_library(HAILO_LIBRARY hailort REQUIRED)
-    target_sources(gd_classifier PRIVATE src/hailo.cpp)
-    target_include_directories(gd_classifier SYSTEM PRIVATE ${HAILO_INCLUDE})
-    target_compile_definitions(gd_classifier PRIVATE GD_HAILO)
-    target_link_libraries(gd_classifier PRIVATE ${HAILO_LIBRARY})
-endif()
+# YOLO kör alltid på Hailo-8.
+find_path(HAILO_INCLUDE hailo/hailort.hpp REQUIRED)
+find_library(HAILO_LIBRARY hailort REQUIRED)
+target_sources(gd_classifier PRIVATE src/hailo.cpp)
+target_include_directories(gd_classifier SYSTEM PRIVATE ${HAILO_INCLUDE})
+target_link_libraries(gd_classifier PRIVATE ${HAILO_LIBRARY})

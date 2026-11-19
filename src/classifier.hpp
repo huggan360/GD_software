@@ -14,9 +14,7 @@
 #include <ByteTrack/BYTETracker.h>
 #include <torch/script.h>
 #include <yaml-cpp/yaml.h>
-#ifdef GD_HAILO
 #include <hailo/hailort.hpp>
-#endif
 
 namespace fs = std::filesystem;
 using Json = nlohmann::json;
@@ -80,26 +78,21 @@ struct RunOptions {
 struct AppSettings {
     YAML::Node values;
     fs::path model_folder, vit_file, yolo_file, label_file, zones_file;
-    std::string backend;
     float vit_weight = 0.7f;
 };
 
-// Kör exporterade PyTorch-modeller på processorn. Samma laddare används för ViT och lokal YOLO.
-class ImageModel {
+// Kör den exporterade ViT-modellen på processorn.
+class VitModel {
 public:
     // Läser modellfilen och dess klassnamn.
-    ImageModel(const fs::path& file, const std::string& expected_format);
+    VitModel(const fs::path& file);
     // Ger en poäng per produktklass för en beskuren RGB-bild.
     std::vector<float> classify(const cv::Mat& image);
-    // Hittar produktrutor med CPU-versionen av YOLO.
-    std::vector<Detection> detect(const cv::Mat& image, float minimum_score);
     std::vector<std::string> class_names;
-    int image_size = 640;
 private:
     torch::jit::Module network;
 };
 
-#ifdef GD_HAILO
 // Callbacken lämnar bara status och sluttid. Den ändrar aldrig spårning eller tidsstatistik.
 struct HailoResult {
     hailo_status status;
@@ -151,29 +144,6 @@ private:
     int width = 640, height = 640;
     float minimum_score = 0.15f;
 };
-#endif
-
-// Väljer Hailo eller CPU en gång när klippet öppnas. Ingen arvshierarki behövs.
-class ProductDetector {
-public:
-    // Laddar den detektor som valts i video.yaml.
-    ProductDetector(const AppSettings& settings);
-    // Lämnar nästa bild till den valda YOLO-modellen.
-    void send(const cv::Mat& image);
-    // Hämtar nästa resultat i samma ordning som bilderna skickades.
-    std::vector<Detection> receive();
-    std::vector<std::string> class_names;
-    size_t queue_size = 1;
-private:
-    float minimum_score;
-    std::deque<std::vector<Detection>> cpu_results;
-    // Äger CPU-modellen när backend är torch; annars är pekaren tom.
-    std::unique_ptr<ImageModel> cpu_model;
-#ifdef GD_HAILO
-    // Äger Hailo-detektorn när backend är hailo.
-    std::unique_ptr<HailoDetector> hailo_model;
-#endif
-};
 
 // Hjälpfunktioner för filer, inställningar och bilder.
 // Läser en JSON-fil.
@@ -200,7 +170,7 @@ std::vector<int> match_class_names(const std::vector<std::string>& yolo_names, c
 // Plockar ut modellens tre högsta poäng med tillhörande klassnamn.
 Json top_three(std::vector<float> scores, const std::vector<std::string>& names);
 // Klassificerar spårets utvalda bilder med ViT och kombinerar användbara YOLO-poäng.
-void classify_product_vit(ProductTrack& track, ImageModel& vit, const std::vector<int>& class_order, float vit_weight, float minimum_score);
+void classify_product_vit(ProductTrack& track, VitModel& vit, const std::vector<int>& class_order, float vit_weight, float minimum_score);
 
 // Väljer tydliga produktbilder från olika tidpunkter till ViT.
 void keep_product_photo(ProductTrack& track, const cv::Mat& image, const cv::Rect2f& box, float score, double time, int limit, const std::vector<float>& yolo_scores);
