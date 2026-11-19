@@ -81,6 +81,13 @@ class ClassifierProgram:
     def prepare_review(self, source, directory, result, progress=None):
         progress = progress or (lambda *_: None)
         source, directory = Path(source).resolve(), Path(directory).resolve()
+        if "video" not in result:
+            probe = json.loads(subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,avg_frame_rate:format=duration", "-of", "json", str(source)], text=True))
+            stream = probe["streams"][0]
+            numerator, denominator = map(int, stream["avg_frame_rate"].split("/"))
+            result["video"] = {"width": stream["width"], "height": stream["height"], "fps": numerator / denominator if denominator else 0, "duration": float(probe["format"].get("duration", 0))}
+        result.setdefault("warnings", [])
+        result["zones"] = self.config["cameras"][result["camera"]]
         proxy = directory / "video.mp4"
         progress(90, "Skapar förhandsvideo")
         if source != proxy:
@@ -91,7 +98,10 @@ class ClassifierProgram:
         self.run_ffmpeg(["-i", str(proxy), "-frames:v", "1", str(directory / "poster.jpg")], directory)
         width, height = result["video"]["width"], result["video"]["height"]
         for number, track in enumerate(result["tracks"], start=1):
+            track.setdefault("events", [movement for movement in result["movements"] if str(movement["track_id"]) == str(track["id"])])
             observations = track.get("observations", [])
+            if "box" in track:
+                observations = [{"box": track["box"], "time": track["time"], "detection_confidence": 0}]
             if not observations:
                 continue
             best_time = track.get("best_view_time")
@@ -131,6 +141,7 @@ class ClassifierProgram:
                 # Alla bildrutor ska analyseras. Långa klipp på Pi:n får därför ta den tid de behöver.
                 subprocess.run(command, stdout=log, stderr=log, check=True)
             result = json.loads(output.read_text())
+            result.update(camera=camera, offset_seconds=offset)
             progress(90, "Förbereder visningen")
             self.prepare_review(source, directory, result, progress=progress)
         finally:

@@ -7,7 +7,7 @@
 //-------------------
 
 // Bufferten anges i analyserade bildrutor, så samma max_gap_seconds gäller vid olika bildfrekvenser.
-Tracker::Tracker(double sample_fps, const YAML::Node& settings, cv::Size image_size, const std::vector<std::string>& class_names) : tracker(30, std::max(1, int(std::ceil(settings["max_gap_seconds"].as<double>() * sample_fps))), 0.25f, 0.25f, 0.8f), image_size(image_size), class_names(class_names) {}
+Tracker::Tracker(double sample_fps, const YAML::Node& settings, cv::Size image_size) : tracker(30, std::max(1, int(std::ceil(settings["max_gap_seconds"].as<double>() * sample_fps))), 0.25f, 0.25f, 0.8f), image_size(image_size) {}
 
 // Kopplar tracks till yolo och vid tveksam bedömning använder vi bara ViT
 static std::vector<int> match_boxes(const std::vector<byte_track::BYTETracker::STrackPtr>& tracks, const std::vector<Detection>& boxes) {
@@ -37,7 +37,7 @@ static std::vector<int> match_boxes(const std::vector<byte_track::BYTETracker::S
 //-------------------
 
 // All kontakt med ByteTrack finns här. Pipelinen får tillbaka vanliga objekt och produktrutor.
-std::vector<TrackedObject> Tracker::update(const std::vector<Detection>& boxes, int frame, double time) {
+std::vector<TrackedObject> Tracker::update(const std::vector<Detection>& boxes, double time) {
     auto start = Clock::now();
     std::vector<byte_track::Object> objects;
     for (const Detection& box : boxes) objects.emplace_back(byte_track::Rect<float>(box.box.x, box.box.y, box.box.width, box.box.height), box.label, box.score);
@@ -57,13 +57,11 @@ std::vector<TrackedObject> Tracker::update(const std::vector<Detection>& boxes, 
         if (box.area() <= 0) continue;
         size_t id = tracked->getTrackId();
         if (!products.count(id)) {
-            std::string label = "item";
-            if (matches[i] >= 0) label = class_names[boxes[matches[i]].label];
-            products[id].details = {{"id", std::to_string(id)}, {"category", "unknown"}, {"classification_confidence", nullptr}, {"label_source", "unclassified"}, {"source_label", label}, {"observations", Json::array()}, {"events", Json::array()}, {"ignored", false}};
+            products[id].details = {{"id", std::to_string(id)}, {"category", "unknown"}, {"classification_confidence", nullptr}};
         }
         // Positionerna räknas mot hela originalbilden, även den bortvalda högersidan.
-        std::vector<double> position{double(box.x / image_size.width), double(box.y / image_size.height), double((box.x + box.width) / image_size.width), double((box.y + box.height) / image_size.height)};
-        products[id].details["observations"].push_back({{"frame", frame}, {"time", time}, {"box", position}, {"detection_confidence", tracked->getScore()}});
+        cv::Rect2f position(box.x / image_size.width, box.y / image_size.height, box.width / image_size.width, box.height / image_size.height);
+        products[id].observations.push_back({time, position});
         std::vector<float> yolo_scores;
         if (matches[i] >= 0) yolo_scores = boxes[matches[i]].class_scores;
         result.push_back({id, box, tracked->getScore(), std::move(yolo_scores)});
@@ -84,9 +82,6 @@ Json read_zones(const YAML::Node& camera) {
         std::vector<double> rectangle = camera[name].as<std::vector<double>>();
         zones[name] = rectangle;
     }
-    if (!zones["inside"].is_null() && !zones["outside"].is_null()) {
-        std::vector<double> inside = zones["inside"], outside = zones["outside"];
-    }
     return zones;
 }
 
@@ -95,9 +90,8 @@ Json read_zones(const YAML::Node& camera) {
 //-------------------
 
 // mitt på objektet bedömmer hur den flyttas inne, ute eller neutral
-std::string find_zone(const Json& box, const Json& zones) {
-    double x = (box[0].get<double>() + box[2].get<double>()) / 2;
-    double y = (box[1].get<double>() + box[3].get<double>()) / 2;
+std::string find_zone(const cv::Rect2f& box, const Json& zones) {
+    double x = box.x + box.width / 2, y = box.y + box.height / 2;
     for (const std::string name : {"inside", "outside"}) {
         if (zones[name].is_null()) continue;
         std::vector<double> rectangle = zones[name];
@@ -111,16 +105,15 @@ void find_movements(ProductTrack& track, const Json& zones, const YAML::Node& se
     std::string previous_zone, candidate_zone;
     double candidate_start = 0, last_stable_time = 0, previous_time = -1;
     int observations_in_zone = 0;
-    for (auto& observation : track.details["observations"]) {
-        double time = observation["time"];
+    for (const Observation& observation : track.observations) {
+        double time = observation.time;
         if (previous_time >= 0 && time - previous_time > settings["max_gap_seconds"].as<double>()) {
             previous_zone.clear();
             candidate_zone.clear();
             observations_in_zone = 0;
         }
         previous_time = time;
-        std::string zone = find_zone(observation["box"], zones);
-        observation["zone"] = zone;
+        std::string zone = find_zone(observation.box, zones);
         if (zone == "inget") {
             candidate_zone.clear();
             observations_in_zone = 0;
@@ -137,8 +130,7 @@ void find_movements(ProductTrack& track, const Json& zones, const YAML::Node& se
         if (!previous_zone.empty() && zone != previous_zone) {
             std::string direction = "out";
             if (zone == "inside") direction = "in";
-            Json event = {{"direction", direction}, {"start", last_stable_time}, {"end", time}, {"event_start", offset + last_stable_time}, {"event_end", offset + time}, {"from_zone", previous_zone}, {"to_zone", zone}, {"source", "zone-crossing"}};
-            track.details["events"].push_back(event);
+            track.events.push_back({{"direction", direction}, {"start", offset + last_stable_time}, {"end", offset + time}});
         }
         previous_zone = zone;
         last_stable_time = time;
@@ -146,11 +138,10 @@ void find_movements(ProductTrack& track, const Json& zones, const YAML::Node& se
 }
 
 // Här klassifierar vi utan en in/ut om vi har en riktig förflyttning
-double track_movement(const Json& observations) {
+double track_movement(const std::vector<Observation>& observations) {
     double left = 1, right = 0, top = 1, bottom = 0;
     for (const auto& observation : observations) {
-        std::vector<double> box = observation["box"];
-        double x = (box[0] + box[2]) / 2, y = (box[1] + box[3]) / 2;
+        double x = observation.box.x + observation.box.width / 2, y = observation.box.y + observation.box.height / 2;
         left = std::min(left, x); right = std::max(right, x);
         top = std::min(top, y); bottom = std::max(bottom, y);
     }

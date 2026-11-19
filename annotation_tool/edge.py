@@ -30,6 +30,7 @@ def import_edge_videos(database, library, editor):
                 continue
             request = json.loads(row["input_json"])
             result = json.loads(row["result_json"])
+            result.update(camera=request["camera"], offset_seconds=request.get("offset_seconds", 0))
             source = Path(request["video_path"])
             if not source.is_file() or request["camera"] not in library.config["cameras"]:
                 missing += 1

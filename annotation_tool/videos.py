@@ -165,7 +165,7 @@ class VideoLibrary:
             if not VIDEO_ID.fullmatch(path.parent.name):
                 continue  # Half-published or temporary folders.
             meta = json.loads(path.read_text())
-            meta["processing"] = read_progress(path.parent, meta)
+            meta["processing"] = read_progress(meta)
             result = path.parent / "result.json"
             if result.is_file():
                 document = json.loads(result.read_text())
@@ -268,6 +268,10 @@ class VideoLibrary:
             raise StoreError("This clip has no result yet.", 409)
         result = json.loads(path.read_text())
         zones = self.config["cameras"][result["camera"]]
+        if any("observations" not in track for track in result["tracks"]):
+            result.update(zones=zones, warnings=["Zonerna är ändrade. Kör Run models again för att räkna om passagerna."])
+            write_json(path, result)
+            return result
         tracks = analyse_tracks(result["tracks"], zones, self.config["tracking"])
         for track in tracks:
             for event in track["events"]:
@@ -309,7 +313,6 @@ def add_video_routes(app, settings, store):
             "edge_available": bool(settings.get("edge_database") and Path(settings["edge_database"]).is_file()),
             "categories": store.categories(),
             "model_message": library.message,
-            "sample_fps": config["tracking"]["sample_fps"],
         }
 
     @app.post("/api/videos")
@@ -372,7 +375,7 @@ def add_video_routes(app, settings, store):
     def video_detail(video_id: str):
         folder = library.folder(video_id)
         value = {"meta": library.meta(video_id)}
-        value["meta"]["processing"] = read_progress(folder, value["meta"])
+        value["meta"]["processing"] = read_progress(value["meta"])
         for name in ("result", "review"):
             path = folder / f"{name}.json"
             value[name] = json.loads(path.read_text()) if path.is_file() else None

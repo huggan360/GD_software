@@ -1,7 +1,6 @@
 #include "program.hpp"
 #include <algorithm>
 #include <cmath>
-#include <iostream>
 #include <numeric>
 
 // Hämtar score från yolo och vit där tom lista betyder att det inte går
@@ -60,18 +59,11 @@ void save_yolo_predictions(ProductTrack& track, const std::vector<std::string>& 
 void decide_product(ProductTrack& track, VitClassifier& vit, const std::vector<int>& class_order, float vit_weight, float minimum_score) {
     std::vector<float> vit_scores(vit.class_names.size(), 0), yolo_scores(vit.class_names.size(), 0);
     bool combine = !class_order.empty();
-    track.details["classification_views"] = Json::array();
-    track.details["classification_image_times_ms"] = Json::array();
-    int completed_photos = 0;
     for (const ProductPhoto& photo : track.photos) {
         auto image_start = Clock::now();
         std::vector<float> scores = vit.classify(photo.image); //------------------TILL VIT------------------------------
-        double image_ms = timings.add("vit_image_total", image_start);
-        track.details["classification_image_times_ms"].push_back({{"time_seconds", photo.time}, {"total_ms", image_ms}});
-        ++completed_photos;
-        std::cout << "ViT objekt " << track.details["id"].get<std::string>() << ": bild " << completed_photos << " av " << track.photos.size() << " klar." << std::endl;
+        timings.add("vit_image_total", image_start);
         for (size_t i = 0; i < scores.size(); ++i) vit_scores[i] += scores[i] / track.photos.size();
-        track.details["classification_views"].push_back(photo.time);
         if (!combine) continue;
         if (photo.yolo_scores.size() != class_order.size()) { combine = false; continue; }
         float total = std::accumulate(photo.yolo_scores.begin(), photo.yolo_scores.end(), 0.0f);
@@ -84,12 +76,9 @@ void decide_product(ProductTrack& track, VitClassifier& vit, const std::vector<i
         for (size_t i = 0; i < final_scores.size(); ++i) final_scores[i] = vit_weight * vit_scores[i] + (1 - vit_weight) * yolo_scores[i];
     }
     track.details["vit_top_categories"] = top_three(vit_scores, vit.class_names);
-    track.details["top_categories"] = top_three(final_scores, vit.class_names);
-    Json best = track.details["top_categories"][0];
+    Json best = top_three(final_scores, vit.class_names)[0];
     track.details["classification_confidence"] = best["confidence"];
     track.details["category"] = "unknown";
     if (best["confidence"].get<float>() >= minimum_score) track.details["category"] = best["category"];
-    track.details["label_source"] = "grocery-vit";
-    if (combine) track.details["label_source"] = "yolo-vit";
     timings.add("vit_decision", decision_start);
 }

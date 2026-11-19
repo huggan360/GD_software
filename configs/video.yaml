@@ -7,7 +7,6 @@ detector:
   hef_labels: yolo/classes.txt
   confidence: 0.15
   max_detections: 100
-  preprocessing: false
   excluded_labels: [person, refrigerator]
 classifier:
   checkpoint: vit/vit.pth  # Exported by GD_vision/compile/export.py; labels are inside.
@@ -15,16 +14,12 @@ classifier:
   crops_per_track: 5
   vit_weight: 0.7
 tracking:
-  sample_fps: 0
   stable_frames: 2
   dwell_seconds: 0.2
   max_gap_seconds: 1.0
   minimum_movement: 0.03
-  max_tracks: 300
 video:
-  max_duration_seconds: 200
   max_upload_mb: 1024
-  max_pixels: 16777216
 cameras:
   fridge:
     inside: null

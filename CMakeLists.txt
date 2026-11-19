@@ -8,7 +8,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(FetchContent)
 
-# Biblioteken hämtas till build/ och blandas inte med vår egen kod.
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs videoio)
 find_package(Eigen3 3.3 QUIET)
 if(NOT Eigen3_FOUND)
@@ -23,17 +22,15 @@ set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(yaml URL https://github.com/jbeder/yaml-cpp/archive/refs/tags/0.8.0.tar.gz)
 FetchContent_MakeAvailable(json yaml)
-# yaml-cpp 0.8 behöver denna standardheader med nyare GCC.
 target_compile_options(yaml-cpp PRIVATE -include cstdint)
 
-# Använder en bestämd version av ByteTrack. Vi skriver inte om själva spårningsalgoritmen.
+
 FetchContent_Declare(bytetrack URL https://github.com/Vertical-Beach/ByteTrack-cpp/archive/d43805d461a714f65da039981bd5f5d21cf5cf59.tar.gz SOURCE_SUBDIR gd-no-build)
 FetchContent_MakeAvailable(bytetrack)
 add_library(gd_bytetrack STATIC ${bytetrack_SOURCE_DIR}/src/BYTETracker.cpp ${bytetrack_SOURCE_DIR}/src/KalmanFilter.cpp ${bytetrack_SOURCE_DIR}/src/lapjv.cpp ${bytetrack_SOURCE_DIR}/src/Object.cpp ${bytetrack_SOURCE_DIR}/src/Rect.cpp ${bytetrack_SOURCE_DIR}/src/STrack.cpp)
 target_include_directories(gd_bytetrack PUBLIC ${bytetrack_SOURCE_DIR}/include)
 target_link_libraries(gd_bytetrack PUBLIC Eigen3::Eigen)
 
-# ViT använder CPU-biblioteken från LibTorch eller den installerade torch-paketmappen.
 set(TORCH_ROOT "" CACHE PATH "LibTorch directory containing include/ and lib/")
 find_path(TORCH_INCLUDE torch/script.h HINTS ${TORCH_ROOT}/include REQUIRED)
 find_library(TORCH_CPU torch_cpu HINTS ${TORCH_ROOT}/lib REQUIRED)
@@ -47,7 +44,6 @@ target_compile_options(gd_classifier PRIVATE -Wall -Wextra)
 get_filename_component(TORCH_LIBRARY_DIR ${TORCH_CPU} DIRECTORY)
 set_target_properties(gd_classifier PROPERTIES BUILD_RPATH "${TORCH_LIBRARY_DIR}")
 
-# YOLO kör alltid på Hailo-8.
 find_path(HAILO_INCLUDE hailo/hailort.hpp REQUIRED)
 find_library(HAILO_LIBRARY hailort REQUIRED)
 target_include_directories(gd_classifier SYSTEM PRIVATE ${HAILO_INCLUDE})

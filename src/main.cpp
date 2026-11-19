@@ -1,65 +1,50 @@
 #include "program.hpp"
 #include <cmath>
-#include <ctime>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
-#include <sstream>
 
 //-------------------
 // Läs och skriv JSON-filer
 //-------------------
 
-// Läser in en JSON-fil.
-Json read_json(const fs::path& file) {
+// Läser in en json
+Json read_json(const std::filesystem::path& file) {
     std::ifstream input(file);
     if (!input) throw std::runtime_error("Kan inte läsa " + file.string());
     return Json::parse(input);
 }
 
 // Skriver klart en tillfällig fil och ger den sedan resultatfilens namn.
-void write_json(const fs::path& file, const Json& value) {
-    auto start = Clock::now();
-    std::string text = value.dump(2);
-    timings.add("json_encode", start);
-    start = Clock::now();
-    fs::create_directories(file.parent_path());
-    fs::path temporary = file.string() + ".tmp";
-    std::ofstream output(temporary);
-    output << text << '\n';
-    output.close();
-    if (!output) throw std::runtime_error("Kan inte skriva " + file.string());
-    fs::rename(temporary, file);
-    timings.add("json_write", start);
-}
 
-// tid för körningen
-std::string current_time() {
-    std::time_t time = std::time(nullptr);
-    std::tm utc{};
-    gmtime_r(&time, &utc);
-    std::ostringstream text;
-    text << std::put_time(&utc, "%Y-%m-%dT%H:%M:%S+00:00");
-    return text.str();
+void write_json(const std::filesystem::path& file, const Json& value) {
+    std::filesystem::create_directories(file.parent_path());
+    std::filesystem::path temporary = file.string() + ".tmp";
+    std::ofstream output(temporary);
+    output << value.dump() << '\n';
+    output.close();
+
+    if (!output) throw std::runtime_error("Kan inte skriva " + file.string());
+    std::filesystem::rename(temporary, file);
 }
 
 // Gör sökvägarna relativa till config filen
-AppSettings load_settings(const RunOptions& options) {
-    AppSettings settings;
+Settings load_settings(const RunOptions& options) {
+
+    Settings settings;
     settings.values = YAML::LoadFile(options.config_file.string());
     YAML::Node config = settings.values;
-    fs::path config_folder = options.config_file.parent_path();
-    settings.model_folder = fs::absolute(config_folder / config["models_directory"].as<std::string>());
+    std::filesystem::path config_folder = options.config_file.parent_path();
+    settings.model_folder = std::filesystem::absolute(config_folder / config["models_directory"].as<std::string>());
 
-    if (!options.model_folder.empty()) settings.model_folder = fs::absolute(options.model_folder);
+    if (!options.model_folder.empty()) settings.model_folder = std::filesystem::absolute(options.model_folder);
     settings.vit_file = settings.model_folder / config["classifier"]["checkpoint"].as<std::string>();
     settings.yolo_file = settings.model_folder / config["detector"]["hef"].as<std::string>();
     settings.label_file = settings.model_folder / config["detector"]["hef_labels"].as<std::string>("yolo/classes.txt");
-    settings.zones_file = fs::absolute(config_folder / config["zones_file"].as<std::string>());
+    settings.zones_file = std::filesystem::absolute(config_folder / config["zones_file"].as<std::string>());
     settings.vit_weight = config["classifier"]["vit_weight"].as<float>(0.7f);
     if (!std::isfinite(settings.vit_weight) || settings.vit_weight < 0 || settings.vit_weight > 1) throw std::runtime_error("vit_weight ska ligga mellan 0 och 1.");
 
-    if (fs::is_regular_file(settings.zones_file)) {
+    if (std::filesystem::is_regular_file(settings.zones_file)) {
         Json zones = read_json(settings.zones_file);
         for (const auto& camera : zones.items()) {
             if (!config["cameras"][camera.key()]) continue;
@@ -72,33 +57,61 @@ AppSettings load_settings(const RunOptions& options) {
 // läser startargument från orkestrator
 RunOptions read_options(int count, char** arguments) {
     RunOptions options;
-    options.config_file = fs::canonical("/proc/self/exe").parent_path().parent_path() / "configs/video.yaml";
-    for (int i = 1; i < count; ++i) {
-        std::string option = arguments[i];
-        if (option == "--help") {
-            std::cout << "gd_classifier --production|--data-aquisition|--test --record-id ID --request request.json --output result.json [--config video.yaml] [--models-dir mapp] [--managed-retention]\n";
-            std::exit(0);
+
+    options.config_file = std::filesystem::canonical("/proc/self/exe").parent_path().parent_path() / "configs/video.yaml";
+
+    for (int i = 1; i < count; i++) {
+        std::string arg = arguments[i];
+
+        if (arg == "--help") {
+            std::cout << "Du kör " "< --production | --data-aquisition | --test > " "--record-id ID --request FIL --output FIL\n"; std::exit(0);
         }
-        if (option == "--managed-retention") continue; // Orkestratorn sköter städningen.
-        if (option == "--production" || option == "--test" || option == "--data-aquisition" || option == "--data-acquisition") {
-            if (!options.mode.empty()) throw std::runtime_error("Välj bara ett körläge.");
-            options.mode = "acquisition";
-            if (option == "--production") options.mode = "production";
-            if (option == "--test") options.mode = "test";
+
+        if (arg == "--managed-retention")
             continue;
-        }
-        if (i + 1 >= count) throw std::runtime_error("Värde saknas efter " + option);
+
+        if (arg == "--production" || arg == "--test" ||
+            arg == "--data-aquisition" || arg == "--data-acquisition") {
+
+            if (!options.mode.empty())
+                throw std::runtime_error("Välj bara ett körläge.");
+
+            if (arg == "--production")
+                options.mode = "production";
+            else if (arg == "--test")
+                options.mode = "test";
+            else
+                options.mode = "acquisition";
+
+            continue;
+            }
+
+            if (i + 1 >= count)
+                throw std::runtime_error("missing value");  //efter mode vill vi ha argument plus ett värde
+
         std::string value = arguments[++i];
-        if (option == "--request") options.request_file = value;
-        else if (option == "--output") options.result_file = value;
-        else if (option == "--record-id") options.record_id = value;
-        else if (option == "--config") options.config_file = value;
-        else if (option == "--models-dir") options.model_folder = value;
-        else throw std::runtime_error("Okänt startargument: " + option);
+
+        if (arg == "--request")
+            options.request_file = value;
+        else if (arg == "--output")
+            options.result_file = value;
+        else if (arg == "--record-id")
+            options.record_id = value;
+        else if (arg == "--config")
+            options.config_file = value;
+        else if (arg == "--models-dir")
+            options.model_folder = value;
+        else
+            throw std::runtime_error("Unkown argument");
     }
-    if (options.mode.empty() || options.record_id.empty() || options.request_file.empty() || options.result_file.empty()) throw std::runtime_error("Ange körläge, record-id, request och output.");
-    options.result_file = fs::absolute(options.result_file);
-    options.config_file = fs::absolute(options.config_file);
+
+    if (options.mode.empty() || options.record_id.empty() || options.request_file.empty() || options.result_file.empty()) {
+        throw std::runtime_error("Enter correct arguments");
+        }
+
+    options.result_file = std::filesystem::absolute(options.result_file);
+    options.config_file = std::filesystem::absolute(options.config_file);
+
     return options;
 }
 
@@ -106,39 +119,46 @@ RunOptions read_options(int count, char** arguments) {
 // Programmets startpunkt
 //-------------------
 
-// main läser startargumenten, kör pipelinen och lämnar tillbaka resultatfilen.
+// main kör pipeline
 int main(int count, char** arguments) {
+
     auto program_start = Clock::now();
+
     try {
-        //-------------------
-        // Steg A: Läs startargumenten och inställningarna
-        //-------------------
+
+        //-------------------------------------
+        // 1: läs argumenten och inställningarna
+        //--------------------------------------
+
         RunOptions options = read_options(count, arguments);
-        if (fs::exists(options.result_file)) throw std::runtime_error("Filen finns redan");
+
         auto start = Clock::now();
-        AppSettings settings = load_settings(options);
+        Settings settings = load_settings(options);
         timings.add("settings_load", start);
-        //-------------------
-        // Steg B: Kör videon genom pipelinen
-        //-------------------
+
+        //-----------------------------------------
+        // 2: Kör videon genom pipelinen
+        //---------------------------------------
+
         start = Clock::now();
         Json result = process_video(options, settings);
         timings.add("pipeline_total", start);
-        //-------------------
-        // Steg C: Spara resultatet och skriv tidsmätningarna
-        //-------------------
-        // JSON-delen innehåller tiderna fram till sparandet. Skrivtid och hela programtiden finns i loggen.
-        result["timings_ms"] = timings.results();
-        result["timing_note"] = "Väggtid i ms. Överlappande steg kan inte summeras. yolo_latency och frame_latency innehåller köväntan. Jämför hastighet med performance.average_frame_ms och processed_fps. JSON-skrivning och hela programtiden finns i loggen.";
+
+        //---------------------------------------------
+        //3: Spara resultatet och printa -tidsmätningarna
+        //--------------------------------------------
+
+        start = Clock::now();
         write_json(options.result_file, result);
+        timings.add("json_write", start);
         timings.add("program_total", program_start);
         timings.print();
-        std::cout << options.result_file.string() << '\n';
+
         return 0;
-    } catch (const std::exception& error) {
-        timings.add("program_total", program_start);
-        timings.print();
-        std::cerr << "Körningen avbröts: " << error.what() << '\n';
+    } catch (const std::exception&) {
+
+
+        std::cerr << "Kunde inte köras" << '\n';
         return 1;
     }
 }

@@ -31,37 +31,14 @@ void keep_product_photo(ProductTrack& track, const cv::Mat& image, const cv::Rec
     int replace_photo = -1;
 
     // Bilder inom 100ms räknas som samma och vi tar den bästa av de
-    if (!track.photos.empty() && time - track.photos.back().time < 0.10) {
-        if (quality <= track.photos.back().quality) { timings.add("photo_selection", stage_start); return; }
-        replace_photo = int(track.photos.size()) - 1;
-
-    } else if (int(track.photos.size()) >= limit) {
-
-        std::vector<double> times, qualities;
-        for (const ProductPhoto& saved : track.photos) {
-
-            times.push_back(saved.time);
-            qualities.push_back(saved.quality);
-        }
-        times.push_back(time);
-        qualities.push_back(quality);
-
-        // tar bilder från olika tidpunkter också
-        int remove_photo = 0;
-        double lowest_value = qualities[0] * 2 * (times[1] - times[0]);
-        for (size_t i = 1; i < times.size(); ++i) {
-            double time_space = 2 * (times[i] - times[i - 1]);
-            if (i + 1 < times.size()) time_space = times[i + 1] - times[i - 1];
-            double value = qualities[i] * time_space;
-            bool middle_photo = i + 1 < times.size();
-            if (value < lowest_value || (value == lowest_value && middle_photo)) {
-                lowest_value = value;
-                remove_photo = int(i);
-            }
-        }
-        if (remove_photo == int(track.photos.size())) { timings.add("photo_selection", stage_start); return; } // inge bra
-        track.photos.erase(track.photos.begin() + remove_photo);
+    for (size_t i = 0; i < track.photos.size(); ++i) {
+        if (std::abs(time - track.photos[i].time) < 0.10) { replace_photo = int(i); break; }
     }
+    // tar bilder från olika tidpunkter också
+    if (replace_photo < 0 && int(track.photos.size()) >= limit) {
+        replace_photo = int(std::min_element(track.photos.begin(), track.photos.end(), [](const ProductPhoto& a, const ProductPhoto& b) { return a.quality < b.quality; }) - track.photos.begin());
+    }
+    if (replace_photo >= 0 && quality <= track.photos[replace_photo].quality) { timings.add("photo_selection", stage_start); return; }
 
     timings.add("photo_selection", stage_start);
     stage_start = Clock::now();
@@ -75,11 +52,18 @@ void keep_product_photo(ProductTrack& track, const cv::Mat& image, const cv::Rec
     timings.add("photo_save", stage_start);
 }
 
-// Används när spåret har produktbilder och vi vill veta vilken som blev tydligast.
-double best_photo_time(const ProductTrack& track) {
-    size_t best_photo = 0;
-    for (size_t i = 1; i < track.photos.size(); ++i) {
-        if (track.photos[i].quality > track.photos[best_photo].quality) best_photo = i;
+// Samlar objektets klassificering, tid och en produktruta i svaret.
+Json product_result(const ProductTrack& track) {
+    double time = track.observations.front().time;
+    if (!track.photos.empty()) {
+        const auto best = std::max_element(track.photos.begin(), track.photos.end(), [](const ProductPhoto& a, const ProductPhoto& b) { return a.quality < b.quality; });
+        time = best->time;
     }
-    return track.photos[best_photo].time;
+    const auto best = std::min_element(track.observations.begin(), track.observations.end(), [time](const Observation& a, const Observation& b) { return std::abs(a.time - time) < std::abs(b.time - time); });
+    Json result = track.details;
+    result["start"] = track.observations.front().time;
+    result["end"] = track.observations.back().time;
+    result["time"] = best->time;
+    result["box"] = {best->box.x, best->box.y, best->box.x + best->box.width, best->box.y + best->box.height};
+    return result;
 }

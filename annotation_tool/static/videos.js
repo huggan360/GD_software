@@ -159,10 +159,7 @@ function renderHeading() {
   const warnings = result ? result.warnings : [];
   $('video-warning').hidden = !warnings.length;
   $('video-warning').textContent = warnings.join(' ');
-  const applied = result?.ignored_region;
-  $('ignored-area-info').textContent = applied
-    ? `YOLO hoppar över högra ${applied.right_pixels} px av originalbilden. Gränsen är fast.`
-    : 'Högra 300 px hoppas över vid nästa modellkörning. Äldre resultat kan innehålla spår där.';
+  $('ignored-area-info').textContent = 'YOLO hoppar över högra 300 px av originalbilden. Gränsen är fast.';
 }
 
 // ---------------------------------------------------------
@@ -216,13 +213,13 @@ function renderInspector() {
     ignore.checked = values.ignored;
     // Äldre resultat med enbart ViT har sina förslag i top_categories.
     const vitPredictions = track.vit_top_categories || (track.label_source === 'grocery-vit' ? track.top_categories : []);
-    const decision = track.label_source === 'unclassified' ? 'Not classified' : `${track.category}${track.classification_confidence != null ? ` ${(track.classification_confidence * 100).toFixed(1)}%` : ''}`;
-    const first = track.observations[0];
-    const image = track.crop_file ? element('img', {src: `/api/videos/${state.current}/files/${track.crop_file}`, alt: `Object ${track.id}`, onclick: () => seek(track.id, first.time)}) : element('div');
+    const decision = track.classification_confidence == null ? 'Not classified' : `${track.category} ${(track.classification_confidence * 100).toFixed(1)}%`;
+    const start = track.start ?? track.observations[0].time, end = track.end ?? track.observations.at(-1).time;
+    const image = track.crop_file ? element('img', {src: `/api/videos/${state.current}/files/${track.crop_file}`, alt: `Object ${track.id}`, onclick: () => seek(track.id, track.time ?? start)}) : element('div');
     $('track-list').append(element('div', {class: `track-row${state.selected === track.id ? ' active' : ''}`, id: `track-${track.id}`}, image,
       element('div', {class: 'object-details'},
         element('strong', {}, `#${track.id}`),
-        element('div', {class: 'muted'}, `${seconds(first.time)}–${seconds(track.observations.at(-1).time)}`),
+        element('div', {class: 'muted'}, `${seconds(start)}–${seconds(end)}`),
         modelPredictions('ViT top 3', vitPredictions),
         modelPredictions('YOLO top 3', track.yolo_top_categories),
         element('div', {class: 'object-decision'}, element('strong', {}, 'Decision'), element('div', {}, decision)),
@@ -254,16 +251,11 @@ $('save-review').addEventListener('click', async () => {
   } catch (error) { toast(error.message, true); }
 });
 
-// Visar det fasta området som aldrig skickas till YOLO. Koordinaterna kommer från körningens resultat.
+// Visar samma fasta område som programmet hoppar över.
 function drawIgnoredArea(context, pictureBox) {
   const result = state.detail?.result;
   if (!result) return;
-  let ignored = result.ignored_region;
-  if (!ignored) {
-    // För äldre klipp visar vi vad nästa körning kommer att hoppa över.
-    const width = result.video.width;
-    ignored = {right_pixels: 300, box: [Math.max(0, (width - 300) / width), 0, 1, 1]};
-  }
+  const ignored = {box: [Math.max(0, (result.video.width - 300) / result.video.width), 0, 1, 1]};
   const [x, y, width, height] = pictureBox(ignored.box);
   context.save();
   context.beginPath();
@@ -279,8 +271,7 @@ function drawIgnoredArea(context, pictureBox) {
     context.stroke();
   }
   context.fillStyle = '#812020';
-  const label = result.ignored_region ? 'YOLO ignorerar området' : 'Undantas vid nästa körning';
-  context.fillText(label, x + 8, y + 20);
+  context.fillText('YOLO ignorerar området', x + 8, y + 20);
   context.restore();
 }
 
@@ -320,11 +311,11 @@ function draw() {
   }
   const result = state.detail?.result;
   if (!result) return;
-  const window = 1 / result.sample_fps;
+  const window = 1 / (result.sample_fps || result.video.fps || 25);
   const now = video.currentTime;
   for (const track of result.tracks) {
-    if (!$('show-all').checked && !track.events.length && (track.movement || 0) < 0.03 && track.id !== state.selected) continue;
-    const nearest = track.observations.reduce((best, row) => Math.abs(row.time - now) < Math.abs(best.time - now) ? row : best);
+    if (!$('show-all').checked && !track.events.length && track.classification_confidence == null && track.id !== state.selected) continue;
+    const nearest = track.box ? track : track.observations.reduce((best, row) => Math.abs(row.time - now) < Math.abs(best.time - now) ? row : best);
     if (Math.abs(nearest.time - now) > window) continue;
     const values = review(track.id);
     if (values.ignored) continue;
