@@ -38,6 +38,13 @@ target_compile_options(gd_classifier PRIVATE -Wall -Wextra)
 get_filename_component(TORCH_LIBRARY_DIR ${TORCH_CPU} DIRECTORY)
 set_target_properties(gd_classifier PROPERTIES BUILD_RPATH "${TORCH_LIBRARY_DIR}")
 
+# OpenBLAS i build/lib används för modellens matrisberäkningar.
+find_library(OPENBLAS_LIBRARY NAMES libblas.so.3 PATHS "${CMAKE_BINARY_DIR}/lib" NO_DEFAULT_PATH)
+if(OPENBLAS_LIBRARY)
+    target_link_libraries(gd_classifier PRIVATE "-Wl,--no-as-needed" "${OPENBLAS_LIBRARY}" "${CMAKE_BINARY_DIR}/lib/liblapack.so.3" "-Wl,--as-needed")
+    set_target_properties(gd_classifier PROPERTIES BUILD_RPATH "$ORIGIN/lib;${TORCH_LIBRARY_DIR}")
+endif()
+
 find_path(HAILO_INCLUDE hailo/hailort.hpp REQUIRED)
 find_library(HAILO_LIBRARY hailort REQUIRED)
 target_include_directories(gd_classifier SYSTEM PRIVATE ${HAILO_INCLUDE})
