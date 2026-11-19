@@ -1,13 +1,13 @@
-#include "classifier.hpp"
+#include "program.hpp"
 #include <algorithm>
 #include <cmath>
 #include <opencv2/imgproc.hpp>
 
-//-----------------
-//Produktbilder
-//--------------------
+//-------------------
+// Välj produktbilder till ViT
+//-------------------
 
-// plockar ut produktbilder som senare blir använda av ViT
+// Behåller upp till fem tydliga utsnitt i minnet, spridda över objektets tid i videon.
 void keep_product_photo(ProductTrack& track, const cv::Mat& image, const cv::Rect2f& box, float score, double time, int limit, const std::vector<float>& yolo_scores) {
     auto stage_start = Clock::now();
     int left = std::clamp(int(std::floor(box.x)), 0, image.cols);

@@ -1,4 +1,4 @@
-#include "classifier.hpp"
+#include "program.hpp"
 #include <cmath>
 #include <ctime>
 #include <fstream>
@@ -6,14 +6,18 @@
 #include <iostream>
 #include <sstream>
 
-// läser in json filen
+//-------------------
+// Läs och skriv JSON-filer
+//-------------------
+
+// Läser in en JSON-fil.
 Json read_json(const fs::path& file) {
     std::ifstream input(file);
     if (!input) throw std::runtime_error("Kan inte läsa " + file.string());
     return Json::parse(input);
 }
 
-// Byter namn på filen
+// Skriver klart en tillfällig fil och ger den sedan resultatfilens namn.
 void write_json(const fs::path& file, const Json& value) {
     auto start = Clock::now();
     std::string text = value.dump(2);
@@ -98,18 +102,31 @@ RunOptions read_options(int count, char** arguments) {
     return options;
 }
 
-// MAIN
+//-------------------
+// Programmets startpunkt
+//-------------------
+
+// main läser startargumenten, kör pipelinen och lämnar tillbaka resultatfilen.
 int main(int count, char** arguments) {
     auto program_start = Clock::now();
     try {
+        //-------------------
+        // Steg A: Läs startargumenten och inställningarna
+        //-------------------
         RunOptions options = read_options(count, arguments);
         if (fs::exists(options.result_file)) throw std::runtime_error("Filen finns redan");
         auto start = Clock::now();
         AppSettings settings = load_settings(options);
         timings.add("settings_load", start);
+        //-------------------
+        // Steg B: Kör videon genom pipelinen
+        //-------------------
         start = Clock::now();
         Json result = process_video(options, settings);
         timings.add("pipeline_total", start);
+        //-------------------
+        // Steg C: Spara resultatet och skriv tidsmätningarna
+        //-------------------
         // JSON-delen innehåller tiderna fram till sparandet. Skrivtid och hela programtiden finns i loggen.
         result["timings_ms"] = timings.results();
         result["timing_note"] = "Väggtid i ms. Överlappande steg kan inte summeras. yolo_latency och frame_latency innehåller köväntan. Jämför hastighet med performance.average_frame_ms och processed_fps. JSON-skrivning och hela programtiden finns i loggen.";

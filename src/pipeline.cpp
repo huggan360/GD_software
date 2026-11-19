@@ -1,4 +1,4 @@
-#include "classifier.hpp"
+#include "program.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -6,10 +6,11 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
 
-// -------------------
-// Hela bildupptagningen
-//----------------------
+// Kör ett färdigt videoklipp genom modellerna, spårningen och produktbeslutet.
 Json process_video(const RunOptions& options, const AppSettings& settings) {
+    //-------------------
+    // Steg A: Läs begäran och kamerans inställningar
+    //-------------------
     auto stage_start = Clock::now();
     Json request = read_json(options.request_file);
     timings.add("request_read", stage_start);
@@ -25,6 +26,9 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
     YAML::Node config = settings.values, tracking = config["tracking"];
     Json zones = read_zones(config["cameras"][camera]);
     if (fs::file_size(source) > config["video"]["max_upload_mb"].as<uint64_t>() * 1024 * 1024) throw std::runtime_error("Videofilen är för stor.");
+    //-------------------
+    // Steg B: Öppna videon och bestäm vilka bildrutor som ska analyseras
+    //-------------------
     stage_start = Clock::now();
     cv::VideoCapture video(source.string());
     double fps = video.get(cv::CAP_PROP_FPS);
@@ -44,14 +48,15 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
 
     int visible_width = width - IGNORE_RIGHT_PIXELS; //ta bort insidan av kylskåp
 
-    int lost_frames = std::max(1, int(std::ceil(tracking["max_gap_seconds"].as<double>() * sample_fps)));
+    //-------------------
+    // Steg C: Ladda YOLO och starta spårningen
+    //-------------------
     stage_start = Clock::now();
-    HailoDetector detector(settings);
+    YoloClassifier yolo(settings);
     timings.add("yolo_load", stage_start);
     stage_start = Clock::now();
-    byte_track::BYTETracker tracker(30, lost_frames, 0.25f, 0.25f, 0.8f);
-    std::vector<std::string> excluded = config["detector"]["excluded_labels"].as<std::vector<std::string>>(std::vector<std::string>{});
-    std::map<size_t, ProductTrack> products;
+    Tracker tracker(sample_fps, tracking, cv::Size(width, height), yolo.class_names);
+    auto& products = tracker.products;
     timings.add("tracking_setup", stage_start);
     std::string started = current_time();
     cv::Mat frame;
@@ -63,12 +68,15 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
     std::deque<VideoFrame> frames;
     auto frames_start = Clock::now();
     auto last_progress = std::chrono::steady_clock::now();
-    std::cout << "YOLO använder " << detector.queue_size << " bildplatser i kön." << std::endl;
+    std::cout << "YOLO använder " << yolo.queue_size << " bildplatser i kön." << std::endl;
 
 
     while (!video_finished || !frames.empty()) {
+        //-------------------
+        // Steg D: Läs, förbered och skicka nästa bilder till YOLO
+        //-------------------
         // Fyll bara de lediga platserna. En full kö väntar; den kastar aldrig bort bildrutor.
-        while (!video_finished && frames.size() < detector.queue_size) {
+        while (!video_finished && frames.size() < yolo.queue_size) {
             auto frame_start = Clock::now();
             bool has_frame = video.read(frame);
             if (!has_frame) { timings.add("video_eof", frame_start); video_finished = true; break; }
@@ -87,61 +95,31 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
             stage_start = Clock::now();
             cv::Mat prepared = prepare_image(rgb, config["detector"]["preprocessing"].as<bool>(false));
             timings.add("image_enhancement", stage_start);
-            detector.send(prepared); //till YOLO; Hailo fortsätter medan vi arbetar vidare
+            yolo.send(prepared); //till YOLO; Hailo fortsätter medan vi arbetar vidare
             frames.push_back({current_frame, std::move(rgb), frame_start});
         }
         if (frames.empty()) break;
 
+        //-------------------
+        // Steg E: Hämta YOLO-svaret och uppdatera spårningen
+        //-------------------
         // Hämta alltid äldsta bilden först, även om andra Hailo-jobb redan är klara.
         VideoFrame current = std::move(frames.front());
         frames.pop_front();
         int current_frame = current.number;
         const cv::Mat& rgb = current.rgb;
-        std::vector<Detection> boxes = detector.receive();
-        stage_start = Clock::now();
-        boxes = remove_duplicate_boxes(boxes, config["detector"]["max_detections"].as<int>());
-        timings.add("yolo_nms", stage_start);
-        stage_start = Clock::now();
-        std::vector<Detection> product_boxes;
-        std::vector<byte_track::Object> objects;
-        for (const Detection& box : boxes) {
+        std::vector<Detection> boxes = yolo.receive();
+        double time = current_frame / fps;
+        std::vector<TrackedObject> objects = tracker.update(boxes, current_frame, time);
 
-            std::string label = detector.class_names[box.label];
-            if (std::find(excluded.begin(), excluded.end(), label) != excluded.end()) continue;
-            product_boxes.push_back(box);
-            objects.emplace_back(byte_track::Rect<float>(box.box.x, box.box.y, box.box.width, box.box.height), box.label, box.score);
-        }
-        timings.add("detection_filter", stage_start);
-        stage_start = Clock::now();
-        auto active_tracks = tracker.update(objects);
-        timings.add("tracking", stage_start);
-        stage_start = Clock::now();
-        std::vector<int> matches = match_boxes(active_tracks, product_boxes);
-        timings.add("track_matching", stage_start);
-        for (size_t i = 0; i < active_tracks.size(); ++i) {
-            stage_start = Clock::now();
-            // Lånar ByteTracks smarta pekare. Trackern äger fortfarande spåret.
-            const auto& tracked = active_tracks[i];
-            const auto& rectangle = tracked->getRect();
-            cv::Rect2f box(rectangle.x(), rectangle.y(), rectangle.width(), rectangle.height());
-            box = box & cv::Rect2f(0, 0, float(visible_width), float(height));
-            if (box.area() <= 0) continue;
-            size_t id = tracked->getTrackId();
-            if (!products.count(id)) {
-                std::string label = "item";
-                if (matches[i] >= 0) label = detector.class_names[product_boxes[matches[i]].label];
-                products[id].details = {{"id", std::to_string(id)}, {"category", "unknown"}, {"classification_confidence", nullptr}, {"label_source", "unclassified"}, {"source_label", label}, {"observations", Json::array()}, {"events", Json::array()}, {"ignored", false}};
-            }
-            ProductTrack& product = products[id];
-            double time = current_frame / fps;
-            // Koordinaterna är fortfarande relativa till HELA bilden, inklusive den bortvalda högersidan.
-            std::vector<double> position{double(box.x / width), double(box.y / height), double((box.x + box.width) / width), double((box.y + box.height) / height)};
-            product.details["observations"].push_back({{"frame", current_frame}, {"time", time}, {"box", position}, {"detection_confidence", tracked->getScore()}});
-            std::vector<float> yolo_scores;
-            if (matches[i] >= 0) yolo_scores = product_boxes[matches[i]].class_scores;
-            timings.add("track_record", stage_start);
-            keep_product_photo(product, rgb, box, tracked->getScore(), time, photo_count, yolo_scores);
-        }
+        //-------------------
+        // Steg F: Behåll tydliga produktbilder från olika tidpunkter till ViT
+        //-------------------
+        for (const TrackedObject& object : objects) keep_product_photo(products[object.id], rgb, object.box, object.score, time, photo_count, object.yolo_scores);
+
+        //-------------------
+        // Steg G: Visa framsteg och tidsmätningar
+        //-------------------
         ++processed_frames;
         timings.add("frame_latency", current.started);
         // Uppdaterar bildruteräknaren ungefär en gång per sekund medan programmet arbetar.
@@ -159,8 +137,11 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
     Json tracks = Json::array(), movements = Json::array(), warnings = Json::array();
 
 
+    //-------------------
+    // Steg H: Bedöm objektens rörelse och passager mellan zonerna
+    //-------------------
     // Äger ViT-modellen och laddar den först när ett objekt behöver klassificeras.
-    std::unique_ptr<VitModel> vit;
+    std::unique_ptr<VitClassifier> vit;
     std::vector<int> class_order;
     for (auto& item : products) {
         ProductTrack& product = item.second;
@@ -169,35 +150,24 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
         double movement = track_movement(product.details["observations"]);
         product.details["movement"] = movement;
         timings.add("zones_movement", stage_start);
-        stage_start = Clock::now();
-        // Sparar YOLO:s egna förslag från de valda bilderna, även om ViT har andra klassnamn.
-        std::vector<float> yolo_scores(detector.class_names.size(), 0);
-        int yolo_photos = 0;
-        for (const ProductPhoto& photo : product.photos) {
-            if (photo.yolo_scores.size() != yolo_scores.size()) continue;
-            for (size_t i = 0; i < yolo_scores.size(); ++i) yolo_scores[i] += photo.yolo_scores[i];
-            ++yolo_photos;
-        }
-        product.details["yolo_top_categories"] = Json::array();
-        if (yolo_photos > 0) {
-            for (float& score : yolo_scores) score /= yolo_photos;
-            product.details["yolo_top_categories"] = top_three(yolo_scores, detector.class_names);
-        }
-        timings.add("yolo_scores", stage_start);
+        save_yolo_predictions(product, yolo.class_names);
         if (!product.photos.empty()) {
             product.details["best_view_time"] = best_photo_time(product);
             if (!product.details["events"].empty() || movement >= tracking["minimum_movement"].as<double>()) {
+                //-------------------
+                // Steg I: Klassificera produktbilderna och bestäm produktnamnet
+                //-------------------
                 if (!vit) {
                     stage_start = Clock::now();
-                    vit = std::make_unique<VitModel>(settings.vit_file);
-                    class_order = match_class_names(detector.class_names, vit->class_names);
-                    if (class_order.empty() && detector.class_names.size() > 1) warnings.push_back("YOLO och ViT har olika listor så vi använder vit");
+                    vit = std::make_unique<VitClassifier>(settings.vit_file);
+                    class_order = match_class_names(yolo.class_names, vit->class_names);
+                    if (class_order.empty() && yolo.class_names.size() > 1) warnings.push_back("YOLO och ViT har olika listor så vi använder vit");
                     timings.add("vit_load", stage_start);
                 }
 
                 std::cout << "ViT klassificerar objekt " << item.first << " med " << product.photos.size() << " bilder." << std::endl;
                 stage_start = Clock::now();
-                classify_product_vit(product, *vit, class_order, settings.vit_weight, config["classifier"]["confidence"].as<float>()); //--------------HÄR KÖR VI VIT-----------
+                decide_product(product, *vit, class_order, settings.vit_weight, config["classifier"]["confidence"].as<float>()); // Här vägs modellernas förslag samman.
                 double milliseconds = timings.add("vit_total", stage_start);
                 product.details["classification_time_ms"] = milliseconds;
                 std::cout << "Tid ViT objekt " << item.first << ": " << milliseconds << " ms." << std::endl;
@@ -208,8 +178,11 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
         tracks.push_back(product.details);
     }
 
+    //-------------------
+    // Steg J: Bygg svaret till orkestratorn
+    //-------------------
     stage_start = Clock::now();
-    // sortera först in osv
+    // Sorterar passagerna efter tidpunkten i klippet.
     std::sort(movements.begin(), movements.end(), [](const Json& first, const Json& second) { return first["start"].get<double>() < second["start"].get<double>(); });
 
     if (zones["inside"].is_null() || zones["outside"].is_null()) warnings.push_back("inga zoner");
@@ -221,7 +194,7 @@ Json process_video(const RunOptions& options, const AppSettings& settings) {
     result["source"] = source.string();
     result["video"] = {{"fps", fps}, {"frames", frame_number}, {"width", width}, {"height", height}, {"duration", frame_number / fps}};
     result["sample_fps"] = sample_fps;
-    result["performance"] = {{"queue_size", detector.queue_size}, {"processed_frames", processed_frames}, {"frames_wall_ms", frames_ms}, {"average_frame_ms", processed_frames > 0 ? frames_ms / processed_frames : 0.0}, {"processed_fps", frames_ms > 0 ? processed_frames * 1000.0 / frames_ms : 0.0}};
+    result["performance"] = {{"queue_size", yolo.queue_size}, {"processed_frames", processed_frames}, {"frames_wall_ms", frames_ms}, {"average_frame_ms", processed_frames > 0 ? frames_ms / processed_frames : 0.0}, {"processed_fps", frames_ms > 0 ? processed_frames * 1000.0 / frames_ms : 0.0}};
     result["zones"] = zones;
     result["tracking_settings"] = {{"sample_fps", requested_fps}, {"stable_frames", tracking["stable_frames"].as<int>()}, {"dwell_seconds", tracking["dwell_seconds"].as<double>()}, {"max_gap_seconds", tracking["max_gap_seconds"].as<double>()}, {"minimum_movement", tracking["minimum_movement"].as<double>()}, {"max_tracks", tracking["max_tracks"].as<int>()}};
     result["backend"] = "hailo";

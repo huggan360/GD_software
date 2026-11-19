@@ -1,4 +1,4 @@
-#include "classifier.hpp"
+#include "program.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -18,8 +18,12 @@ std::shared_ptr<uint8_t> allocate_hailo_buffer(size_t bytes) {
     return std::shared_ptr<uint8_t>(static_cast<uint8_t*>(address), [bytes](uint8_t* buffer) { munmap(buffer, bytes); });
 }
 
+//-------------------
+// Steg A: Ladda YOLO på Hailo och förbered bildbuffertarna
+//-------------------
+
 // Hailos expect avbryter med ett felmeddelande om ett anrop misslyckas.
-HailoDetector::HailoDetector(const AppSettings& settings) {
+YoloClassifier::YoloClassifier(const AppSettings& settings) {
     std::ifstream labels(settings.label_file);
     std::string name;
     while (std::getline(labels, name)) {
@@ -28,6 +32,8 @@ HailoDetector::HailoDetector(const AppSettings& settings) {
     }
     if (class_names.empty()) throw std::runtime_error("YOLO behöver klassnamn i yolo/classes.txt.");
     minimum_score = settings.values["detector"]["confidence"].as<float>();
+    max_detections = settings.values["detector"]["max_detections"].as<int>();
+    excluded_labels = settings.values["detector"]["excluded_labels"].as<std::vector<std::string>>(std::vector<std::string>{});
     class_outputs = settings.values["detector"]["class_outputs"].as<std::vector<std::string>>(std::vector<std::string>{});
     // Fyra klasser ger samma kanalantal som boxutgångarna, så då behöver utgångarna namnges.
     if (class_names.size() == 4 && class_outputs.size() != 3) throw std::runtime_error("Ange klassutgångarnas namn i detector.class_outputs för en HEF med fyra klasser.");
@@ -94,12 +100,16 @@ HailoDetector::HailoDetector(const AppSettings& settings) {
 }
 
 // Avbryter kvarvarande jobb vid fel och låter dem avslutas innan buffertarna förstörs.
-HailoDetector::~HailoDetector() {
+YoloClassifier::~YoloClassifier() {
     network.shutdown();
 }
 
+//-------------------
+// Steg B: Förbered och skicka nästa bild
+//-------------------
+
 // Förbereder och skickar en bild. Hailo fortsätter arbeta efter att funktionen har återvänt.
-void HailoDetector::send(const cv::Mat& image) {
+void YoloClassifier::send(const cv::Mat& image) {
     if (pending >= queue_size) throw std::runtime_error("Hämta ett YOLO-svar innan fler bilder skickas.");
     HailoRequest& request = *requests[next_send];
     auto stage_start = Clock::now();
@@ -123,8 +133,12 @@ void HailoDetector::send(const cv::Mat& image) {
     ++pending;
 }
 
+//-------------------
+// Steg C: Hämta modellens svar och läs produktrutorna
+//-------------------
+
 // Hämtar äldsta bildens svar. Övriga bilder kan fortsätta köras på Hailo under avkodningen.
-std::vector<Detection> HailoDetector::receive() {
+std::vector<Detection> YoloClassifier::receive() {
     if (pending == 0) throw std::runtime_error("Det finns ingen väntande YOLO-bild.");
     HailoRequest& request = *requests[next_receive];
     auto stage_start = Clock::now();
@@ -188,5 +202,15 @@ std::vector<Detection> HailoDetector::receive() {
     timings.add("yolo_decode", stage_start);
     next_receive = (next_receive + 1) % queue_size;
     --pending;
-    return detections;
+    stage_start = Clock::now();
+    detections = remove_duplicate_boxes(detections, max_detections);
+    timings.add("yolo_nms", stage_start);
+    stage_start = Clock::now();
+    std::vector<Detection> products;
+    for (Detection& detection : detections) {
+        const std::string& label = class_names[detection.label];
+        if (std::find(excluded_labels.begin(), excluded_labels.end(), label) == excluded_labels.end()) products.push_back(std::move(detection));
+    }
+    timings.add("detection_filter", stage_start);
+    return products;
 }

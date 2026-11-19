@@ -1,14 +1,14 @@
-#include "classifier.hpp"
+#include "program.hpp"
 #include <algorithm>
 #include <cmath>
 #include <opencv2/imgproc.hpp>
 
 
 //-------------------
-// PRE PROCESSING
+// Förbered bilder och jämför produktrutor
 //-------------------
 
-// Gör bilden skala upp
+// Anpassar bildstorleken och fyller ut kanterna så att proportionerna behålls.
 cv::Mat resize_for_yolo(const cv::Mat& image, int width, int height, float& scale, int& left, int& top) {
     scale = std::min(float(width) / image.cols, float(height) / image.rows);
     cv::Mat resized;

@@ -1,4 +1,5 @@
 #pragma once
+// Gemensamma typer, klasser och funktionsdeklarationer för C++-programmet.
 #include <cstdint>
 #include <chrono>
 #include <deque>
@@ -68,6 +69,14 @@ struct ProductTrack {
     std::vector<ProductPhoto> photos;
 };
 
+// Ett objekt som ByteTrack har följt i den aktuella bildrutan.
+struct TrackedObject {
+    size_t id;
+    cv::Rect2f box;
+    float score;
+    std::vector<float> yolo_scores;
+};
+
 // Det som orkestratorn skickar när programmet startas.
 struct RunOptions {
     fs::path request_file, result_file, config_file, model_folder;
@@ -82,10 +91,10 @@ struct AppSettings {
 };
 
 // Kör den exporterade ViT-modellen på processorn.
-class VitModel {
+class VitClassifier {
 public:
     // Läser modellfilen och dess klassnamn.
-    VitModel(const fs::path& file);
+    VitClassifier(const fs::path& file);
     // Ger en poäng per produktklass för en beskuren RGB-bild.
     std::vector<float> classify(const cv::Mat& image);
     std::vector<std::string> class_names;
@@ -117,12 +126,12 @@ struct HailoRequest {
 };
 
 // Här finns de Hailo-specifika delarna. Resten av programmet arbetar med vanliga produktrutor.
-class HailoDetector {
+class YoloClassifier {
 public:
     // Öppnar acceleratorn och läser den kompilerade YOLO-modellen.
-    HailoDetector(const AppSettings& settings);
+    YoloClassifier(const AppSettings& settings);
     // Avslutar även väntande jobb innan bildbuffertarna frigörs.
-    ~HailoDetector();
+    ~YoloClassifier();
     // Skickar nästa bild utan att vänta på modellkörningen.
     void send(const cv::Mat& image);
     // Väntar på den äldsta bilden och översätter dess produktrutor.
@@ -143,6 +152,22 @@ private:
     std::string input_name;
     int width = 640, height = 640;
     float minimum_score = 0.15f;
+    int max_detections = 100;
+    std::vector<std::string> excluded_labels;
+};
+
+// Äger ByteTrack och samlar observationer och produktbilder för varje objekt.
+class Tracker {
+public:
+    // Anpassar spårbufferten till bildfrekvensen och sparar bildstorlek och klassnamn.
+    Tracker(double sample_fps, const YAML::Node& settings, cv::Size image_size, const std::vector<std::string>& class_names);
+    // Kopplar produktrutor till spår och sparar deras positioner i bildrutan.
+    std::vector<TrackedObject> update(const std::vector<Detection>& boxes, int frame, double time);
+    std::map<size_t, ProductTrack> products;
+private:
+    byte_track::BYTETracker tracker;
+    cv::Size image_size;
+    std::vector<std::string> class_names;
 };
 
 // Hjälpfunktioner för filer, inställningar och bilder.
@@ -169,8 +194,10 @@ Json process_video(const RunOptions& options, const AppSettings& settings);
 std::vector<int> match_class_names(const std::vector<std::string>& yolo_names, const std::vector<std::string>& vit_names);
 // Plockar ut modellens tre högsta poäng med tillhörande klassnamn.
 Json top_three(std::vector<float> scores, const std::vector<std::string>& names);
-// Klassificerar spårets utvalda bilder med ViT och kombinerar användbara YOLO-poäng.
-void classify_product_vit(ProductTrack& track, VitModel& vit, const std::vector<int>& class_order, float vit_weight, float minimum_score);
+// Sparar YOLO:s förslag från objektets utvalda produktbilder.
+void save_yolo_predictions(ProductTrack& track, const std::vector<std::string>& class_names);
+// Klassificerar objektets bilder med ViT och väger samman användbara modellförslag.
+void decide_product(ProductTrack& track, VitClassifier& vit, const std::vector<int>& class_order, float vit_weight, float minimum_score);
 
 // Väljer tydliga produktbilder från olika tidpunkter till ViT.
 void keep_product_photo(ProductTrack& track, const cv::Mat& image, const cv::Rect2f& box, float score, double time, int limit, const std::vector<float>& yolo_scores);
@@ -183,5 +210,3 @@ Json read_zones(const YAML::Node& camera);
 void find_movements(ProductTrack& track, const Json& zones, const YAML::Node& settings, double offset);
 // Beräknar hur långt objektets mittpunkt har förflyttat sig i bilden.
 double track_movement(const Json& observations);
-// Kopplar ByteTracks spår till rätt YOLO-rutor i samma bildruta.
-std::vector<int> match_boxes(const std::vector<byte_track::BYTETracker::STrackPtr>& tracks, const std::vector<Detection>& boxes);

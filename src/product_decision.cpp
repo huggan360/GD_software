@@ -1,31 +1,8 @@
-#include "classifier.hpp"
+#include "program.hpp"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <numeric>
-
-// Bildförberedelsen finns inuti den exporterade ViT-modellen.
-std::vector<float> VitModel::classify(const cv::Mat& image) {
-    auto stage_start = Clock::now();
-    c10::InferenceMode inference;
-    // Pixelpekaren lånas från OpenCV under modellkörningen; bilden äger fortfarande minnet.
-    torch::Tensor input = torch::from_blob(image.data, {image.rows, image.cols, 3}, torch::kUInt8);
-    double tensor_ms = timings.add("vit_tensor", stage_start);
-    stage_start = Clock::now();
-    // Den exporterade modellen innehåller både RGB-förberedelsen och själva ViT.
-    torch::Tensor logits = network.forward({input}).toTensor();
-    double forward_ms = timings.add("vit_forward", stage_start);
-    stage_start = Clock::now();
-    torch::Tensor scores = logits.softmax(1).contiguous();
-    double softmax_ms = timings.add("vit_softmax", stage_start);
-    if (scores.numel() != int64_t(class_names.size())) throw std::runtime_error("ViT:s utdata stämmer inte med klassnamnen.");
-    stage_start = Clock::now();
-    std::vector<float> result(class_names.size());
-    for (size_t i = 0; i < result.size(); ++i) result[i] = scores[0][i].item<float>();
-    double copy_ms = timings.add("vit_result_copy", stage_start);
-    std::cout << "Tid ViT-bild (ms): tensor=" << tensor_ms << ", forward=" << forward_ms << ", softmax=" << softmax_ms << ", result_copy=" << copy_ms << std::endl;
-    return result;
-}
 
 // Hämtar score från yolo och vit där tom lista betyder att det inte går
 std::vector<int> match_class_names(const std::vector<std::string>& yolo_names, const std::vector<std::string>& vit_names) {
@@ -61,8 +38,26 @@ Json top_three(std::vector<float> scores, const std::vector<std::string>& names)
     return result;
 }
 
-// Bedömning med vit
-void classify_product_vit(ProductTrack& track, VitModel& vit, const std::vector<int>& class_order, float vit_weight, float minimum_score) {
+// Sparar YOLO:s egna förslag från samma bilder som valts till ViT.
+void save_yolo_predictions(ProductTrack& track, const std::vector<std::string>& class_names) {
+    auto start = Clock::now();
+    std::vector<float> scores(class_names.size(), 0);
+    int photos = 0;
+    for (const ProductPhoto& photo : track.photos) {
+        if (photo.yolo_scores.size() != scores.size()) continue;
+        for (size_t i = 0; i < scores.size(); ++i) scores[i] += photo.yolo_scores[i];
+        ++photos;
+    }
+    track.details["yolo_top_categories"] = Json::array();
+    if (photos > 0) {
+        for (float& score : scores) score /= photos;
+        track.details["yolo_top_categories"] = top_three(scores, class_names);
+    }
+    timings.add("yolo_scores", start);
+}
+
+// Väger modellernas förslag och bestämmer produktnamnet för hela objektspåret.
+void decide_product(ProductTrack& track, VitClassifier& vit, const std::vector<int>& class_order, float vit_weight, float minimum_score) {
     std::vector<float> vit_scores(vit.class_names.size(), 0), yolo_scores(vit.class_names.size(), 0);
     bool combine = !class_order.empty();
     track.details["classification_views"] = Json::array();
