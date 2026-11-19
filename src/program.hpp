@@ -133,7 +133,6 @@ class YoloClassifier {
         std::vector<std::unique_ptr<HailoRequest>> requests;
         int next_send = 0, next_receive = 0, pending = 0;
         std::vector<hailo_vstream_info_t> outputs;
-        std::vector<std::string> class_outputs;
         std::string input_name;
         int width = 640, height = 640;
         float minimum_score = 0.15f;
@@ -167,8 +166,6 @@ Settings load_settings(const RunOptions& options);
 cv::Mat resize_for_yolo(const cv::Mat& image, int width, int height, float& scale, int& left, int& top);
 
 float box_overlap(const cv::Rect2f& first, const cv::Rect2f& second);
-
-std::vector<Detection> remove_duplicate_boxes(std::vector<Detection> boxes, int limit);
 
 Json process_video(const RunOptions& options, const Settings& settings);
 

@@ -6,7 +6,6 @@
 #include "program.hpp"
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <future>
@@ -56,8 +55,6 @@ YoloClassifier::YoloClassifier(const Settings& settings) {
     minimum_score = settings.values["detector"]["confidence"].as<float>();
     max_detections = settings.values["detector"]["max_detections"].as<int>();
     excluded_labels = settings.values["detector"]["excluded_labels"].as<std::vector<std::string>>(std::vector<std::string>{});
-    class_outputs = settings.values["detector"]["class_outputs"].as<std::vector<std::string>>(std::vector<std::string>{});
-    if (class_names.size() == 4 && class_outputs.size() != 3) throw std::runtime_error("Ange klassutgångarnas namn i detector.class_outputs för en HEF med fyra klasser.");
 
     hailo_vdevice_params_t device_settings;
     hailo_status status = hailo_init_vdevice_params(&device_settings);
@@ -78,8 +75,8 @@ YoloClassifier::YoloClassifier(const Settings& settings) {
     model = device->create_infer_model(settings.yolo_file.string()).expect("Kan inte läsa YOLO:s HEF-fil.");
     auto inputs = model->hef().get_input_vstream_infos().expect("Kan inte läsa modellens bildingång.");
     outputs = model->hef().get_output_vstream_infos().expect("Kan inte läsa modellens utgångar.");
-    if (inputs.size() != 1 || (outputs.size() != 1 && outputs.size() != 6)) throw std::runtime_error("Använd YOLO11 eller YOLO26 från GD_tracking.");
-    if (outputs.size() == 1 && (outputs[0].format.order != HAILO_FORMAT_ORDER_HAILO_NMS_BY_CLASS || outputs[0].nms_shape.number_of_classes != class_names.size())) throw std::runtime_error("YOLO:s utgång stämmer inte med klassnamnen.");
+    if (inputs.size() != 1 || outputs.size() != 1) throw std::runtime_error("Använd YOLO11-exporten från GD_tracking.");
+    if (outputs[0].format.order != HAILO_FORMAT_ORDER_HAILO_NMS_BY_CLASS || outputs[0].nms_shape.number_of_classes != class_names.size()) throw std::runtime_error("YOLO:s utgång stämmer inte med klassnamnen.");
     if (inputs[0].shape.features != 3) throw std::runtime_error("YOLO behöver RGB-bilder med tre färgkanaler.");
     input_name = inputs[0].name;
     width = inputs[0].shape.width;
@@ -89,7 +86,7 @@ YoloClassifier::YoloClassifier(const Settings& settings) {
     model->input(input_name).expect("Bildingången saknas.").set_format_order(HAILO_FORMAT_ORDER_NHWC);
     for (const auto& output : outputs) {
         model->output(output.name).expect("Modellutgången saknas.").set_format_type(HAILO_FORMAT_TYPE_FLOAT32);
-        model->output(output.name).expect("Modellutgången saknas.").set_format_order(outputs.size() == 1 ? HAILO_FORMAT_ORDER_HAILO_NMS_BY_CLASS : HAILO_FORMAT_ORDER_NHWC);
+        model->output(output.name).expect("Modellutgången saknas.").set_format_order(HAILO_FORMAT_ORDER_HAILO_NMS_BY_CLASS);
     }
     network = model->configure().expect("Kan inte förbereda Hailos asynkrona bildflöde.");
     status = network.activate();
@@ -166,75 +163,31 @@ std::vector<Detection> YoloClassifier::receive() {
     int left = request.left, top = request.top;
     stage_start = Clock::now();
     std::vector<Detection> detections;
-    if (outputs.size() == 1) {
-        // YOLO11 lämnar färdiga boxar: först antalet, sedan y1, x1, y2, x2 och poäng.
-        const float* values = reinterpret_cast<const float*>(request.output_buffers.at(outputs[0].name).get());
-        for (int label = 0; label < int(class_names.size()); ++label) {
-            int count = int(*values++);
-            for (int i = 0; i < count; ++i, values += 5) {
-                if (values[4] < minimum_score) continue;
-                float x1 = std::clamp((values[1] * width - left) / scale, 0.0f, float(request.image_width));
-                float y1 = std::clamp((values[0] * height - top) / scale, 0.0f, float(request.image_height));
-                float x2 = std::clamp((values[3] * width - left) / scale, 0.0f, float(request.image_width));
-                float y2 = std::clamp((values[2] * height - top) / scale, 0.0f, float(request.image_height));
-                Detection detection;
-                detection.box = {x1, y1, x2 - x1, y2 - y1};
-                detection.label = label;
-                detection.score = values[4];
-                detection.class_scores.resize(class_names.size(), 0);
-                detection.class_scores[label] = detection.score;
-                if (detection.box.area() > 0) detections.push_back(std::move(detection));
-            }
-        }
-    } else for (const auto& box_output : outputs) {
-        bool is_class_output = std::find(class_outputs.begin(), class_outputs.end(), box_output.name) != class_outputs.end();
-        if (box_output.shape.features != 4 || is_class_output) continue;
-        const hailo_vstream_info_t* class_output = nullptr;
-        for (const auto& output : outputs) {
-            bool correct_name = class_outputs.empty() || std::find(class_outputs.begin(), class_outputs.end(), output.name) != class_outputs.end();
-            bool same_grid = output.shape.height == box_output.shape.height && output.shape.width == box_output.shape.width;
-            if (std::string(output.name) != box_output.name && same_grid && output.shape.features == class_names.size() && correct_name) class_output = &output;
-        }
-        if (!class_output) throw std::runtime_error("HEF-modellens klassutgångar stämmer inte med klassnamnen.");
-        const float* box_values = reinterpret_cast<const float*>(request.output_buffers.at(box_output.name).get());
-        const float* class_values = reinterpret_cast<const float*>(request.output_buffers.at(class_output->name).get());
-        bool needs_sigmoid = false;
-        int class_values_count = int(class_output->shape.height) * int(class_output->shape.width) * int(class_names.size());
-        for (int i = 0; i < class_values_count; ++i) if (class_values[i] < 0 || class_values[i] > 1) needs_sigmoid = true;
-
-        for (int y = 0; y < int(box_output.shape.height); ++y) {
-            for (int x = 0; x < int(box_output.shape.width); ++x) {
-                int cell = y * box_output.shape.width + x;
-                Detection detection;
-                detection.score = 0;
-                detection.label = 0;
-                detection.class_scores.resize(class_names.size());
-                for (int label = 0; label < int(class_names.size()); ++label) {
-                    float score = class_values[cell * class_names.size() + label];
-                    if (needs_sigmoid) score = 1.0f / (1.0f + std::exp(-score));
-                    detection.class_scores[label] = score;
-                    if (score > detection.score) { detection.score = score; detection.label = label; }
-                }
-                if (detection.score < minimum_score) continue;
-                const float* edges = box_values + cell * 4;
-                float step_x = float(width) / box_output.shape.width;
-                float step_y = float(height) / box_output.shape.height;
-                float x1 = std::clamp(((x + 0.5f - edges[0]) * step_x - left) / scale, 0.0f, float(request.image_width));
-                float y1 = std::clamp(((y + 0.5f - edges[1]) * step_y - top) / scale, 0.0f, float(request.image_height));
-                float x2 = std::clamp(((x + 0.5f + edges[2]) * step_x - left) / scale, 0.0f, float(request.image_width));
-                float y2 = std::clamp(((y + 0.5f + edges[3]) * step_y - top) / scale, 0.0f, float(request.image_height));
-                detection.box = {x1, y1, x2 - x1, y2 - y1};
-                if (detection.box.area() > 0) detections.push_back(detection);
-            }
+    // YOLO11 lämnar färdiga boxar: först antalet, sedan y1, x1, y2, x2 och poäng.
+    const float* values = reinterpret_cast<const float*>(request.output_buffers.at(outputs[0].name).get());
+    for (int label = 0; label < int(class_names.size()); ++label) {
+        int count = int(*values++);
+        for (int i = 0; i < count; ++i, values += 5) {
+            if (values[4] < minimum_score) continue;
+            float x1 = std::clamp((values[1] * width - left) / scale, 0.0f, float(request.image_width));
+            float y1 = std::clamp((values[0] * height - top) / scale, 0.0f, float(request.image_height));
+            float x2 = std::clamp((values[3] * width - left) / scale, 0.0f, float(request.image_width));
+            float y2 = std::clamp((values[2] * height - top) / scale, 0.0f, float(request.image_height));
+            Detection detection;
+            detection.box = {x1, y1, x2 - x1, y2 - y1};
+            detection.label = label;
+            detection.score = values[4];
+            detection.class_scores.resize(class_names.size(), 0);
+            detection.class_scores[label] = detection.score;
+            if (detection.box.area() > 0) detections.push_back(std::move(detection));
         }
     }
     timings.add("yolo_decode", stage_start);
     next_receive = (next_receive + 1) % queue_size;
     --pending;
     stage_start = Clock::now();
-    if (outputs.size() == 6) detections = remove_duplicate_boxes(detections, max_detections);
-    else if (int(detections.size()) > max_detections) detections.resize(max_detections);
-    timings.add("yolo_nms", stage_start);
+    if (int(detections.size()) > max_detections) detections.resize(max_detections);
+    timings.add("yolo_limit", stage_start);
     stage_start = Clock::now();
     std::vector<Detection> products;
     for (Detection& detection : detections) {
