@@ -1,5 +1,5 @@
 # ---------------------
-# LOCAL WEB SERVER FOR VIDEO REVIEW
+# LOCAL WEB SERVER: VIDEO VIEWER OR YOLO IMAGE ANNOTATION
 # ---------------------
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from annotation_tool.settings import read_mode
 from annotation_tool.store import Store, StoreError
 from annotation_tool.images import add_image_routes
 from annotation_tool.videos import add_video_routes
@@ -30,7 +31,7 @@ class CategoryRequest(BaseModel):
 # ---------------------
 def create_app(settings):
     """Startar det fristående utvecklingsverktyget för klipp och klassificeringar."""
-    store = Store(settings["storage"], settings["categories"])
+    store = Store(settings["storage"])
     static = Path(__file__).parent / "static"
     library = None
 
@@ -51,8 +52,9 @@ def create_app(settings):
 
     @app.get("/")
     def home():
-        """Serve the review interface without a frontend build step."""
-        return FileResponse(static / "index.html", headers={"Cache-Control": "no-cache"})
+        """Acquisition: bildannotering för YOLO. Test och production: titta på klippen."""
+        page = "images.html" if read_mode(settings) == "acquisition" else "index.html"
+        return FileResponse(static / page, headers={"Cache-Control": "no-cache"})
 
     @app.post("/api/editors")
     def register(body: EditorRequest):
@@ -65,6 +67,6 @@ def create_app(settings):
         return {"name": store.add_category(body.name, x_session)}
 
     library = add_video_routes(app, settings, store)
-    add_image_routes(app, settings, store, static)
+    add_image_routes(app, settings, store)
     app.mount("/static", StaticFiles(directory=static), name="static")
     return app

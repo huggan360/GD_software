@@ -3,18 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Review</title>
-  <link rel="stylesheet" href="/static/style.css?v=11">
-  <script src="/static/videos.js?v=10" defer></script>
+  <title>Fridge videos</title>
+  <link rel="stylesheet" href="/static/style.css?v=12">
+  <script src="/static/videos.js?v=11" defer></script>
 </head>
 <body>
   <!-- ---------------------------------------------------- -->
   <!-- UPLOAD A CLIP                                       -->
   <!-- ---------------------------------------------------- -->
   <header class="topbar">
-    <div class="presence"><strong>Review</strong><a class="nav-link" href="/images">Images (YOLO) →</a></div>
+    <div class="presence"><strong>Fridge videos</strong><span id="mode-badge"></span></div>
     <div class="header-actions">
-      <button id="export-button" class="quiet">Export reviewed</button>
       <button id="upload-button">Upload video</button>
       <span id="user-badge" class="user-badge"></span>
     </div>
@@ -48,16 +47,13 @@
       <div class="editor-footer"><span class="muted">Orange = ute, grön gränszon = inne. Alla zoner har full höjd. Bara nettobyte mellan spårets början och slut räknas.</span></div>
     </section>
     <!-- ---------------------------------------------------- -->
-    <!-- MOVEMENTS AND TRACK CORRECTIONS                      -->
+    <!-- MOVEMENTS AND THE MODELS' OBJECTS (READ ONLY)        -->
     <!-- ---------------------------------------------------- -->
     <aside class="inspector">
       <div class="panel-heading"><h2>Movements</h2><span id="movement-count" class="count-pill">0</span></div>
       <div id="movement-list" class="movement-list"><p class="muted">No clip selected.</p></div>
       <div class="panel-heading"><h2>Objects</h2><span id="track-count" class="count-pill">0</span></div>
       <div id="track-list" class="track-list"></div>
-      <label class="field-label" for="notes">Notes</label><textarea id="notes" rows="2" maxlength="4000"></textarea>
-      <label class="empty-check"><input id="reviewed" type="checkbox">Reviewed</label>
-      <div class="review-actions"><button id="save-review" class="primary">Save review</button></div>
     </aside>
   </main>
   <div id="toast" class="toast" role="status" hidden></div>

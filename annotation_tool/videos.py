@@ -1,5 +1,5 @@
 # ---------------------
-# Utvecklingsverktyg: läs klipp och resultat, granska spår och exportera träningsdata.
+# Utvecklingsverktyg (test/production): titta på klipp och modellernas resultat, kör om på nya modeller.
 # ---------------------
 import json
 import re
@@ -11,11 +11,12 @@ from pathlib import Path
 
 from fastapi import File, Form, Header, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from annotation_tool.store import StoreError, category_name
+from annotation_tool.store import StoreError
 from annotation_tool.program import ClassifierProgram, load_config, write_json
 from annotation_tool.progress import read_progress
+from annotation_tool.settings import read_mode
 
 VIDEO_ID = re.compile(r"[0-9a-f]{24}")
 EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".h264", ".m4v"}
@@ -24,12 +25,6 @@ EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".h264", ".m4v"}
 # ---------------------
 # API request fields
 # ---------------------
-class ReviewRequest(BaseModel):
-    tracks: dict[str, dict]
-    notes: str = Field(default="", max_length=4000)
-    reviewed: bool = False
-
-
 class ReclassifyRequest(BaseModel):
     all_videos: bool = False
 
@@ -72,7 +67,7 @@ class VideoLibrary:
     # Back up and reclassify videos
     # ---------------------
     def reclassify(self, editor, video_ids=None):
-        """Back up predictions/reviews, then queue clips for fresh model outputs."""
+        """Back up predictions, then queue clips for fresh model outputs."""
         batch = secrets.token_hex(12)
         backup = self.root.parent / "reclassification_backups" / batch
         queued = []
@@ -87,13 +82,11 @@ class VideoLibrary:
                     continue
                 destination = backup / video_id
                 destination.mkdir(parents=True)
-                paths = [folder / name for name in ("meta.json", "result.json", "review.json")]
+                paths = [folder / name for name in ("meta.json", "result.json")]
                 paths.extend(folder.glob("track-*.jpg"))
                 for path in paths:
                     if path.is_file():
                         shutil.copy2(path, destination / path.name)
-                # Human track corrections cannot be attached to new tracking IDs.
-                (folder / "review.json").unlink(missing_ok=True)
                 meta.update(
                     status="queued",
                     progress=0,
@@ -163,9 +156,6 @@ class VideoLibrary:
                 document = json.loads(result.read_text())
                 meta["movements"] = len(document.get("movements", []))
                 meta["tracks"] = len(document.get("tracks", []))
-            meta["reviewed"] = (path.parent / "review.json").is_file() and json.loads(
-                (path.parent / "review.json").read_text()
-            ).get("reviewed", False)
             rows.append(meta)
         return sorted(rows, key=lambda row: row["created"], reverse=True)
 
@@ -210,43 +200,6 @@ class VideoLibrary:
             except Exception as error:
                 self.update(meta["id"], status="failed", message=str(error)[:1000])
 
-    # ---------------------
-    # REVIEWED TRACK CROPS -> classification/<category>/ FOR train_vit.py
-    # ---------------------
-    def export(self):
-        """Zip the best crop of every reviewed, labelled, non-ignored track."""
-        import tempfile
-        import zipfile
-
-        handle = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
-        handle.close()
-        count = 0
-        with zipfile.ZipFile(handle.name, "w") as archive:
-            for meta in self.items():
-                folder = self.root / meta["id"]
-                review = folder / "review.json"
-                if not meta["reviewed"] or not (folder / "result.json").is_file():
-                    continue
-                tracks = json.loads(review.read_text())["tracks"]
-                for track in json.loads((folder / "result.json").read_text())["tracks"]:
-                    values = tracks.get(track["id"], {})
-                    crop = folder / track.get("crop_file", "")
-                    if (
-                        values.get("ignored")
-                        or values.get("category", "unknown") == "unknown"
-                        or not crop.is_file()
-                    ):
-                        continue
-                    archive.write(
-                        crop, f"classification/{values['category']}/{meta['id']}-{track['id']}.jpg"
-                    )
-                    count += 1
-        if not count:
-            Path(handle.name).unlink()
-            raise StoreError("No reviewed, labelled tracks to export yet.", 409)
-        return Path(handle.name)
-
-
 
 # ---------------------
 # Video API routes
@@ -267,7 +220,7 @@ def add_video_routes(app, settings, store):
         return {
             "items": library.items(),
             "cameras": config["cameras"],
-            "categories": store.categories(),
+            "mode": read_mode(settings),
             "model_message": library.message,
         }
 
@@ -302,19 +255,6 @@ def add_video_routes(app, settings, store):
             temporary.unlink(missing_ok=True)
             file.file.close()
 
-    @app.get("/api/videos/export")
-    def export(x_session: str = Header()):
-        from starlette.background import BackgroundTask
-
-        editor(x_session)
-        path = library.export()
-        return FileResponse(
-            path,
-            filename="fridge-video-crops.zip",
-            media_type="application/zip",
-            background=BackgroundTask(path.unlink, missing_ok=True),
-        )
-
     @app.post("/api/videos/reclassify")
     def reclassify_all(body: ReclassifyRequest, x_session: str = Header()):
         name = editor(x_session)
@@ -327,9 +267,8 @@ def add_video_routes(app, settings, store):
         folder = library.folder(video_id)
         value = {"meta": library.meta(video_id)}
         value["meta"]["processing"] = read_progress(value["meta"])
-        for name in ("result", "review"):
-            path = folder / f"{name}.json"
-            value[name] = json.loads(path.read_text()) if path.is_file() else None
+        path = folder / "result.json"
+        value["result"] = json.loads(path.read_text()) if path.is_file() else None
         return value
 
     @app.get("/api/videos/{video_id}/files/{name}")
@@ -350,36 +289,5 @@ def add_video_routes(app, settings, store):
         if not result["queued"]:
             raise StoreError("This clip is already queued.", 409)
         return library.meta(video_id)
-
-    @app.put("/api/videos/{video_id}/review")
-    def review(video_id: str, body: ReviewRequest, x_session: str = Header()):
-        name = editor(x_session)
-        folder = library.folder(video_id)
-        tracks = {}
-        for track_id, values in body.tracks.items():
-            category = values.get("category", "unknown")
-            if category != "unknown":
-                category_name(category)
-            if values.get("direction", "auto") not in ("auto", "in", "out", "none"):
-                raise StoreError("Direction must be auto, in, out or none.")
-            tracks[str(track_id)] = {
-                "category": category,
-                "ignored": bool(values.get("ignored")),
-                "direction": values.get("direction", "auto"),
-            }
-        document = {
-            "tracks": tracks,
-            "notes": body.notes,
-            "reviewed": body.reviewed,
-            "editor": name,
-            "saved_at": time.time(),
-        }
-        with library.lock:
-            if library.meta(video_id)["status"] != "done":
-                raise StoreError(
-                    "Wait until the new predictions finish before saving a review.", 409
-                )
-            write_json(folder / "review.json", document)
-        return document
 
     return library

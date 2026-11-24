@@ -33,9 +33,9 @@ def category_name(value):
 # Reviewer sessions and shared categories
 # ---------------------
 class Store:
-    """Who is reviewing, and which grocery categories they can choose."""
+    """Who is annotating, and which item types they can choose."""
 
-    def __init__(self, root, categories):
+    def __init__(self, root):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.database = self.root / "review.sqlite3"
@@ -46,10 +46,6 @@ class Store:
                     token TEXT PRIMARY KEY, name TEXT NOT NULL, last_seen REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS categories (name TEXT PRIMARY KEY);
             """)
-            for name in categories:
-                connection.execute(
-                    "INSERT OR IGNORE INTO categories VALUES (?)", (category_name(name),)
-                )
 
     @contextmanager
     def connect(self, write=False):

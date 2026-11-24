@@ -4,15 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Images</title>
-  <link rel="stylesheet" href="/static/style.css?v=11">
-  <script src="/static/images.js?v=1" defer></script>
+  <link rel="stylesheet" href="/static/style.css?v=12">
+  <script src="/static/images.js?v=2" defer></script>
 </head>
 <body>
   <!-- ---------------------------------------------------- -->
   <!-- TAKE OR UPLOAD PHOTOS, DOWNLOAD THE YOLO DATASET     -->
   <!-- ---------------------------------------------------- -->
   <header class="topbar">
-    <div class="presence"><strong>YOLO images</strong><a class="nav-link" href="/">← Videos</a></div>
+    <div class="presence"><strong>YOLO images</strong><span>acquisition mode</span></div>
     <div class="header-actions">
       <span id="dataset-count" class="muted"></span>
       <button id="download-dataset" class="quiet">Download dataset</button>
@@ -46,7 +46,7 @@
       <div class="editor-heading"><div><h2 id="image-title">Select an image</h2><p id="image-meta"></p></div><span id="image-state" class="save-state"></span></div>
       <div id="camera-warning" class="warning" hidden></div>
       <div class="image-stage" id="image-stage">
-        <p id="image-empty" class="empty-editor">Take a photo or upload images. They appear on the right.</p>
+        <p id="image-empty" class="empty-editor">Take a photo or upload images. They appear on the right.<br>First add the item types you need with “+ Add a new item type”.</p>
         <canvas id="image-canvas" hidden></canvas>
       </div>
       <div class="editor-footer"><span class="muted">Drag to draw a box. Click a box to select it, drag to move, drag a corner to resize. <kbd>Del</kbd> deletes the selected box, <kbd>N</kbd>/<kbd>P</kbd> next/previous image.</span></div>

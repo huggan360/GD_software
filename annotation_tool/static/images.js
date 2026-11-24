@@ -77,6 +77,8 @@ async function refresh() {
     state.library = await api('/api/images');
   } catch (error) { toast(error.message, true); return; }
   const library = state.library;
+  // Fridge left acquisition: the same address now shows the video viewer.
+  if (library.mode !== 'acquisition') { if (!state.dirty) location.reload(); return; }
   $('take-photo').disabled = !library.camera.available;
   $('take-photo').title = library.camera.reason;
   $('camera-warning').hidden = library.camera.available;
@@ -263,7 +265,7 @@ $('image-canvas').addEventListener('pointerdown', (event) => {
     return;
   }
   // 3: annars ritas en ny ruta med den valda varan.
-  if (!state.category) { toast('Choose an item first.', true); return; }
+  if (!state.category) { toast('Add an item type first (+ Add a new item type).', true); return; }
   state.boxes.push({category: state.category, box: [x, y, x, y]});
   state.selected = state.boxes.length - 1;
   state.drag = {mode: 'resize', index: state.selected, fixed: [x, y], fresh: true};

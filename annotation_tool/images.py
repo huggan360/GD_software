@@ -21,6 +21,7 @@ from PIL import Image, ImageOps
 from pydantic import BaseModel, Field
 
 from annotation_tool.program import write_json
+from annotation_tool.settings import read_mode
 from annotation_tool.store import StoreError, category_name
 
 IMAGE_ID = re.compile(r"[0-9a-f]{24}")
@@ -127,11 +128,9 @@ class ImageLibrary:
         command = self.settings.get("capture_command")
         if not command:
             return {"available": False, "reason": "No capture_command in config.yaml; upload images instead."}
-        mode_file = self.settings.get("mode_file")
-        if mode_file and Path(mode_file).is_file():
-            mode = Path(mode_file).read_text().strip()
-            if mode != "acquisition":
-                return {"available": False, "reason": f"The fridge is in {mode} mode. Run: smartfridge mode acquisition"}
+        mode = read_mode(self.settings)
+        if mode != "acquisition":
+            return {"available": False, "reason": f"The fridge is in {mode} mode. Run: smartfridge mode acquisition"}
         return {"available": True, "reason": ""}
 
     def capture(self, editor):
@@ -257,17 +256,13 @@ class ImageLibrary:
 # ---------------------
 # Image API routes
 # ---------------------
-def add_image_routes(app, settings, store, static):
+def add_image_routes(app, settings, store):
     library = ImageLibrary(settings)
     app.state.images = library
 
     def editor(token):
         with store.connect(write=True) as connection:
             return store.editor(token, connection)
-
-    @app.get("/images")
-    def images_page():
-        return FileResponse(static / "images.html", headers={"Cache-Control": "no-cache"})
 
     @app.get("/api/images")
     def list_images():
@@ -277,6 +272,7 @@ def add_image_routes(app, settings, store, static):
             "categories": store.categories(),
             "camera": library.camera_state(),
             "annotated": sum(item["annotated"] for item in items),
+            "mode": read_mode(settings),
         }
 
     @app.post("/api/images")
