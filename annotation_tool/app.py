@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from annotation_tool.store import Store, StoreError
+from annotation_tool.images import add_image_routes
 from annotation_tool.videos import add_video_routes
 
 
@@ -64,5 +65,6 @@ def create_app(settings):
         return {"name": store.add_category(body.name, x_session)}
 
     library = add_video_routes(app, settings, store)
+    add_image_routes(app, settings, store, static)
     app.mount("/static", StaticFiles(directory=static), name="static")
     return app

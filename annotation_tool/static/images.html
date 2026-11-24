@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Images</title>
+  <link rel="stylesheet" href="/static/style.css?v=11">
+  <script src="/static/images.js?v=1" defer></script>
+</head>
+<body>
+  <!-- ---------------------------------------------------- -->
+  <!-- TAKE OR UPLOAD PHOTOS, DOWNLOAD THE YOLO DATASET     -->
+  <!-- ---------------------------------------------------- -->
+  <header class="topbar">
+    <div class="presence"><strong>YOLO images</strong><a class="nav-link" href="/">← Videos</a></div>
+    <div class="header-actions">
+      <span id="dataset-count" class="muted"></span>
+      <button id="download-dataset" class="quiet">Download dataset</button>
+      <button id="upload-images">Upload images</button>
+      <input id="upload-files" type="file" accept="image/jpeg,image/png" multiple hidden>
+      <button id="take-photo" class="primary" disabled>Take photo</button>
+      <span id="user-badge" class="user-badge"></span>
+    </div>
+  </header>
+  <main class="workspace images-workspace">
+    <!-- ---------------------------------------------------- -->
+    <!-- BOXES IN THE OPEN IMAGE                              -->
+    <!-- ---------------------------------------------------- -->
+    <aside class="inspector">
+      <label class="field-label" for="current-category">Item for new boxes</label>
+      <select id="current-category"></select>
+      <button id="new-category" class="text-button">+ Add a new item type</button>
+      <div class="panel-heading"><h2>Boxes</h2><span id="box-count" class="count-pill">0</span></div>
+      <div id="box-list" class="box-list"><p class="muted">Drag on the image to draw a box.</p></div>
+      <p id="annotation-info" class="muted"></p>
+      <div class="review-actions">
+        <label class="empty-check"><input id="jump-next" type="checkbox" checked>Open next unannotated after saving</label>
+        <button id="save-annotation" class="primary">Save <kbd>S</kbd></button>
+        <button id="delete-image" class="danger-text">Delete this image</button>
+      </div>
+    </aside>
+    <!-- ---------------------------------------------------- -->
+    <!-- IMAGE WITH BOXES                                     -->
+    <!-- ---------------------------------------------------- -->
+    <section class="editor-panel">
+      <div class="editor-heading"><div><h2 id="image-title">Select an image</h2><p id="image-meta"></p></div><span id="image-state" class="save-state"></span></div>
+      <div id="camera-warning" class="warning" hidden></div>
+      <div class="image-stage" id="image-stage">
+        <p id="image-empty" class="empty-editor">Take a photo or upload images. They appear on the right.</p>
+        <canvas id="image-canvas" hidden></canvas>
+      </div>
+      <div class="editor-footer"><span class="muted">Drag to draw a box. Click a box to select it, drag to move, drag a corner to resize. <kbd>Del</kbd> deletes the selected box, <kbd>N</kbd>/<kbd>P</kbd> next/previous image.</span></div>
+    </section>
+    <!-- ---------------------------------------------------- -->
+    <!-- ALL IMAGES, NEWEST FIRST; GREEN = ANNOTATED          -->
+    <!-- ---------------------------------------------------- -->
+    <aside class="queue-panel image-queue">
+      <div class="panel-heading"><h2>Images</h2><span id="image-progress" class="count-pill"></span></div>
+      <label class="empty-check"><input id="only-open" type="checkbox">Only not annotated</label>
+      <div id="image-list" class="thumb-list"></div>
+    </aside>
+  </main>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <dialog id="join-dialog"><form id="join-form"><label for="editor-name">Your name</label><input id="editor-name" required maxlength="40" autocomplete="given-name"><button class="primary" type="submit">Open</button></form></dialog>
+</body>
+</html>

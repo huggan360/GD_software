@@ -5,9 +5,15 @@ storage: data
 video_config: ../configs/video.yaml
 preview_width: 1280
 preview_preset: veryfast
-# Valfritt: sökväg till smart-fridge-edge/database/fridge.sqlite3 på samma dator.
-# Databasen öppnas enbart för läsning. Videor och rättningar kopieras till verktygets storage.
-edge_database: null
+# Bildinsamling för YOLO (acquisition). Fotot tas av edge, inte av C++-programmet.
+# Kommandot får den nya bildens sökväg som sista argument. null = bara uppladdning. På Pi:n:
+# [/srv/smart-fridge/smart-fridge-edge/.venv/bin/python, /srv/smart-fridge/smart-fridge-edge/run.py,
+#  --config, /srv/smart-fridge/smart-fridge-edge/config/pi.toml, --data-aquisition, --capture-image]
+capture_command: null
+# Fotoknappen är bara aktiv när den här filen innehåller "acquisition".
+mode_file: /etc/smart-fridge/mode
+# Andel av bilderna som hamnar i val när YOLO-datasetet byggs.
+validation_fraction: 0.2
 categories:
   # Dairy, eggs and plant-based alternatives.
   - milk

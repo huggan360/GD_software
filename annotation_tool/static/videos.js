@@ -77,7 +77,6 @@ async function refresh() {
     return;
   }
   const library = state.library;
-  $("edge-import-button").disabled = !library.edge_available;
   if (!$('upload-camera').options.length) {
     for (const camera of Object.keys(library.cameras)) $('upload-camera').append(new Option(camera, camera));
   }
@@ -109,19 +108,6 @@ function renderList() {
     list.append(card);
   }
 }
-
-// Läser färdiga körningar från edge. Rättningar sparas bara i verktygets egen mapp.
-$('edge-import-button').addEventListener('click', async () => {
-  const button = $('edge-import-button');
-  button.disabled = true;
-  try {
-    const result = await api('/api/edge/import', 'POST');
-    toast(`${result.imported} klipp hämtade från edge. ${result.missing} saknar tillgänglig video.`);
-    state.signature = '';
-    await refresh();
-  } catch (error) { toast(error.message, true); }
-  button.disabled = !state.library?.edge_available;
-});
 
 // ---------------------------------------------------------
 // OPEN ONE CLIP

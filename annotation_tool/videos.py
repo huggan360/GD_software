@@ -15,7 +15,6 @@ from pydantic import BaseModel, Field
 
 from annotation_tool.store import StoreError, category_name
 from annotation_tool.program import ClassifierProgram, load_config, write_json
-from annotation_tool.edge import import_edge_videos
 from annotation_tool.progress import read_progress
 
 VIDEO_ID = re.compile(r"[0-9a-f]{24}")
@@ -88,14 +87,13 @@ class VideoLibrary:
                     continue
                 destination = backup / video_id
                 destination.mkdir(parents=True)
-                paths = [folder / name for name in ("meta.json", "result.json", "review.json", ".edge-result.json")]
+                paths = [folder / name for name in ("meta.json", "result.json", "review.json")]
                 paths.extend(folder.glob("track-*.jpg"))
                 for path in paths:
                     if path.is_file():
                         shutil.copy2(path, destination / path.name)
                 # Human track corrections cannot be attached to new tracking IDs.
                 (folder / "review.json").unlink(missing_ok=True)
-                (folder / ".edge-result.json").unlink(missing_ok=True)
                 meta.update(
                     status="queued",
                     progress=0,
@@ -202,11 +200,7 @@ class VideoLibrary:
                     self.message = self.program.message
                 started = time.monotonic()
                 source = folder / meta["original"]
-                edge_result = folder / ".edge-result.json"
-                if edge_result.is_file():
-                    self.program.prepare_review(source, folder, json.loads(edge_result.read_text()), progress=lambda value, text: self.update(meta["id"], progress=value, message=text))
-                else:
-                    self.program.run(source, folder, meta["camera"], meta["event_id"], progress=lambda value, text: self.update(meta["id"], progress=value, message=text))
+                self.program.run(source, folder, meta["camera"], meta["event_id"], progress=lambda value, text: self.update(meta["id"], progress=value, message=text))
                 self.update(
                     meta["id"],
                     status="done",
@@ -273,7 +267,6 @@ def add_video_routes(app, settings, store):
         return {
             "items": library.items(),
             "cameras": config["cameras"],
-            "edge_available": bool(settings.get("edge_database") and Path(settings["edge_database"]).is_file()),
             "categories": store.categories(),
             "model_message": library.message,
         }
@@ -321,11 +314,6 @@ def add_video_routes(app, settings, store):
             media_type="application/zip",
             background=BackgroundTask(path.unlink, missing_ok=True),
         )
-
-    @app.post("/api/edge/import")
-    def read_edge_videos(x_session: str = Header()):
-        name = editor(x_session)
-        return import_edge_videos(settings.get("edge_database"), library, name)
 
     @app.post("/api/videos/reclassify")
     def reclassify_all(body: ReclassifyRequest, x_session: str = Header()):
