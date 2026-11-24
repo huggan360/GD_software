@@ -179,7 +179,6 @@ function renderBoxes() {
   const list = $('box-list');
   list.replaceChildren();
   $('box-count').textContent = state.boxes.length;
-  if (!state.boxes.length) list.append(element('p', {class: 'muted'}, state.current ? 'No boxes. Drag on the image to draw one, or save as an empty image.' : 'Select an image.'));
   state.boxes.forEach((row, index) => {
     const select = element('select', {onchange: (event) => { row.category = event.target.value; changed(); }, onclick: (event) => event.stopPropagation()});
     for (const name of state.library?.categories || []) select.append(new Option(name, name));

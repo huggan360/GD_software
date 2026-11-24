@@ -147,7 +147,6 @@ function renderHeading() {
   const warnings = result ? result.warnings : [];
   $('video-warning').hidden = !warnings.length;
   $('video-warning').textContent = warnings.join(' ');
-  $('ignored-area-info').textContent = `Högra ${IGNORE_RIGHT_PIXELS} px ignoreras. De ${BORDER_ZONE_PIXELS} px direkt till vänster är gränszonen och räknas som inne.`;
 }
 
 // ---------------------------------------------------------

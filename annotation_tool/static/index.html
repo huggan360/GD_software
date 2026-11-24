@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Fridge videos</title>
   <link rel="stylesheet" href="/static/style.css?v=12">
-  <script src="/static/videos.js?v=11" defer></script>
+  <script src="/static/videos.js?v=12" defer></script>
 </head>
 <body>
   <!-- ---------------------------------------------------- -->
@@ -32,10 +32,9 @@
       <div class="toolbar">
         <div class="tool-group"><label class="empty-check"><input id="show-all" type="checkbox">Show all objects</label><button id="rerun-button">Run models again</button></div>
       </div>
-      <p id="ignored-area-info" class="ignored-area-note">Högra 450 px ignoreras av YOLO. Gränszonen på 100 px direkt till vänster räknas som inne.</p>
       <div class="video-stage" id="video-stage">
         <div id="video-empty" class="empty-editor" role="status">
-          <strong id="processing-title">Upload a clip.</strong>
+          <strong id="processing-title"></strong>
           <p id="processing-detail"></p>
           <progress id="processing-progress" max="100" hidden></progress>
         </div>
@@ -44,7 +43,6 @@
           <canvas id="overlay" aria-label="Spår, zoner och fast undantaget område till höger"></canvas>
         </div>
       </div>
-      <div class="editor-footer"><span class="muted">Orange = ute, grön gränszon = inne. Alla zoner har full höjd. Bara nettobyte mellan spårets början och slut räknas.</span></div>
     </section>
     <!-- ---------------------------------------------------- -->
     <!-- MOVEMENTS AND THE MODELS' OBJECTS (READ ONLY)        -->

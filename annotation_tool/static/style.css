@@ -148,9 +148,6 @@ dialog input, dialog select { width: 100%; }
   .editor-heading { flex-wrap: wrap; }
 }
 
-/* Informationen är bara en förklaring. Gränsen går inte att ändra i verktyget. */
-.ignored-area-note { margin: 0; padding: 8px 16px; background: #fff3f3; color: #8f2525; border-bottom: 1px solid #e8caca; font-size: 12px; }
-
 /* ---------------------------------------------------------
    YOLO IMAGES: BOXES LEFT, IMAGE IN THE MIDDLE, IMAGE LIST RIGHT
    --------------------------------------------------------- */
