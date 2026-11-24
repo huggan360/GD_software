@@ -27,6 +27,9 @@ from annotation_tool.store import StoreError, category_name
 IMAGE_ID = re.compile(r"[0-9a-f]{24}")
 EXTENSIONS = {".jpg": ".jpg", ".jpeg": ".jpg", ".png": ".png"}
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+# Värmekamerans bild roteras medurs som i edge:s thermal-live-vy.
+ROTATIONS = {0: None, 90: Image.Transpose.ROTATE_270, 180: Image.Transpose.ROTATE_180, 270: Image.Transpose.ROTATE_90}
+HEAT_COLOURS = [(0, (0, 40, 255)), (0.25, (0, 220, 255)), (0.5, (255, 235, 0)), (0.75, (255, 100, 0)), (1, (255, 0, 0))]
 # Samma kolumner som GD_tracking/utilities/synthetic_data.py skriver.
 CSV_FIELDS = ["image", "product_name", "class_id", "source_image", "background_frame", "variant",
               "xmin", "ymin", "xmax", "ymax", "width", "height", "split"]
@@ -42,6 +45,27 @@ class BoxRequest(BaseModel):
 
 class AnnotationRequest(BaseModel):
     boxes: list[BoxRequest] = Field(max_length=200)
+
+
+def heat_colour(value):
+    value = max(0.0, min(1.0, value))
+    for (left, start), (right, end) in zip(HEAT_COLOURS, HEAT_COLOURS[1:]):
+        if value <= right:
+            mix = (value - left) / (right - left)
+            return tuple(round(a + (b - a) * mix) for a, b in zip(start, end))
+    return HEAT_COLOURS[-1][1]
+
+
+# 32x24 råvärden från ESP:n (raw / 128 - 64 = °C) blir en förstorad blå-röd bild.
+def render_thermal(frame, destination, rotation):
+    temperatures = [raw / 128 - 64 for raw in frame["raw_u16"]]
+    low, high = min(temperatures), max(temperatures)
+    picture = Image.new("RGB", (32, 24))
+    picture.putdata([heat_colour((value - low) / max(0.01, high - low)) for value in temperatures])
+    if ROTATIONS[rotation] is not None:
+        picture = picture.transpose(ROTATIONS[rotation])
+    picture.resize((picture.width * 10, picture.height * 10), Image.Resampling.NEAREST).save(destination)
+    return {"min_c": round(low, 1), "max_c": round(high, 1)}
 
 
 # ---------------------
@@ -86,7 +110,7 @@ class ImageLibrary:
     # ---------------------
     # Add a photo (camera or upload)
     # ---------------------
-    def add(self, source, filename, editor, origin):
+    def add(self, source, filename, editor, origin, thermal=None):
         suffix = EXTENSIONS.get(Path(filename).suffix.lower())
         if suffix is None:
             raise StoreError("Upload JPG or PNG images.")
@@ -107,10 +131,15 @@ class ImageLibrary:
                 thumbnail = upright.convert("RGB")
                 thumbnail.thumbnail((320, 320))
                 thumbnail.save(staging / "thumb.jpg", quality=80)
+            heat = None
+            if thermal is not None:
+                shutil.copyfile(thermal, staging / "thermal.json")
+                rotation = int(self.settings.get("thermal_rotation", 270))
+                heat = render_thermal(json.loads(thermal.read_text()), staging / "thermal.png", rotation)
             write_json(staging / "meta.json", {
                 "id": image_id, "filename": Path(filename).name[:200], "image": target.name,
                 "width": width, "height": height, "created": time.time(),
-                "editor": editor, "source": origin,
+                "editor": editor, "source": origin, "thermal": heat,
             })
             staging.rename(self.root / image_id)
         except StoreError:
@@ -147,7 +176,12 @@ class ImageLibrary:
                                       capture_output=True, text=True, timeout=60)
             if finished.returncode != 0 or not photo.is_file():
                 raise StoreError(f"Camera failed: {(finished.stderr or finished.stdout).strip()[-400:]}", 500)
-            return self.add(photo, time.strftime("photo-%Y%m%d-%H%M%S.jpg"), editor, "camera")
+            # Edge sparar värmebilden bredvid fotot. Saknas den är fotot ändå användbart.
+            thermal = photo.with_suffix(".thermal.json")
+            thermal = thermal if thermal.is_file() else None
+            image_id = self.add(photo, time.strftime("photo-%Y%m%d-%H%M%S.jpg"), editor, "camera", thermal)
+            warning = "" if thermal else "No thermal image: " + (finished.stderr.strip()[-300:] or "thermal camera is off")
+            return {"id": image_id, "warning": warning}
         except subprocess.TimeoutExpired as error:
             raise StoreError("The camera did not answer within 60 s.", 500) from error
         finally:
@@ -226,6 +260,11 @@ class ImageLibrary:
                     # Tom bild: negativt exempel med tom labelfil, som i GD_tracking.
                     writer.writerow(dict(common, product_name="", class_id="", xmin="", ymin="", xmax="", ymax=""))
                 (output / "labels" / split / (meta["id"] + ".txt")).write_text("".join(lines))
+                # Värmebilden följer med under samma namn, utanför YOLO:s images/ och labels/.
+                thermal = self.root / meta["id"] / "thermal.json"
+                if thermal.is_file():
+                    (output / "thermal" / split).mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(thermal, output / "thermal" / split / (meta["id"] + ".json"))
         settings = {"path": str(self.dataset.resolve()), "train": "images/train", "val": "images/val", "names": names}
         (output / "dataset.yaml").write_text(yaml.safe_dump(settings, allow_unicode=True, sort_keys=False), encoding="utf-8")
         (output / "classes.txt").write_text("".join(name + "\n" for name in names), encoding="utf-8")
@@ -297,7 +336,7 @@ def add_image_routes(app, settings, store):
 
     @app.post("/api/images/capture")
     def capture(x_session: str = Header()):
-        return {"id": library.capture(editor(x_session))}
+        return library.capture(editor(x_session))
 
     @app.get("/api/images/dataset")
     def download_dataset(x_session: str = Header()):
@@ -320,6 +359,13 @@ def add_image_routes(app, settings, store):
     @app.get("/api/images/{image_id}/thumb")
     def image_thumb(image_id: str):
         return FileResponse(library.folder(image_id) / "thumb.jpg")
+
+    @app.get("/api/images/{image_id}/thermal")
+    def image_thermal(image_id: str):
+        path = library.folder(image_id) / "thermal.png"
+        if not path.is_file():
+            raise StoreError("This image has no thermal picture.", 404)
+        return FileResponse(path)
 
     @app.put("/api/images/{image_id}/annotation")
     def save_annotation(image_id: str, body: AnnotationRequest, x_session: str = Header()):

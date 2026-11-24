@@ -154,6 +154,11 @@ async function openImage(id) {
   const {meta} = state.detail;
   $('image-title').textContent = meta.filename;
   $('image-meta').textContent = `${meta.width}×${meta.height}, ${meta.source} by ${meta.editor}, ${new Date(meta.created * 1000).toLocaleString()}`;
+  $('thermal-panel').hidden = !meta.thermal;
+  if (meta.thermal) {
+    $('thermal-image').src = `/api/images/${id}/thermal`;
+    $('thermal-range').textContent = `${meta.thermal.min_c}–${meta.thermal.max_c} °C`;
+  }
   $('image-empty').hidden = true;
   $('image-canvas').hidden = false;
   renderStatus();
@@ -342,7 +347,7 @@ $('delete-image').addEventListener('click', async () => {
     await api(`/api/images/${state.current}`, 'DELETE');
     state.current = null; state.detail = null; state.picture = null; state.boxes = []; state.dirty = false;
     $('image-canvas').hidden = true; $('image-empty').hidden = false;
-    $('image-title').textContent = 'Select an image'; $('image-meta').textContent = '';
+    $('image-title').textContent = 'Select an image'; $('image-meta').textContent = ''; $('thermal-panel').hidden = true;
     renderStatus(); renderBoxes();
     toast('Image deleted.');
     refresh();
@@ -370,6 +375,7 @@ $('take-photo').addEventListener('click', async () => {
   button.textContent = 'Taking photo…';
   try {
     const result = await api('/api/images/capture', 'POST');
+    if (result.warning) toast(result.warning, true);
     await refresh();
     openImage(result.id);
   } catch (error) { toast(error.message, true); }

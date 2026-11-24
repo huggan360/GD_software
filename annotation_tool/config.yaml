@@ -12,5 +12,7 @@ preview_preset: veryfast
 capture_command: null
 # Fotoknappen är bara aktiv när den här filen innehåller "acquisition".
 mode_file: /etc/smart-fridge/mode
+# Värmebildens rotation medurs (0, 90, 180, 270), samma som standardläget i thermal-live.
+thermal_rotation: 270
 # Andel av bilderna som hamnar i val när YOLO-datasetet byggs.
 validation_fraction: 0.2

@@ -168,3 +168,5 @@ dialog input, dialog select { width: 100%; }
 .save-state.saved { color: #217a38; font-weight: bold; }
 .save-state.unlabelled { font-weight: bold; }
 @media (max-width: 950px) { .images-workspace { grid-template-columns: 220px minmax(260px, 1fr) 170px; } }
+.thermal-image { width: 100%; image-rendering: pixelated; border-radius: 3px; background: #222; }
+#thermal-panel { margin-top: 12px; }
