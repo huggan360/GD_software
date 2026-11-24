@@ -4,6 +4,7 @@
 # ---------------------
 import csv
 import json
+import os
 import re
 import secrets
 import shutil
@@ -97,12 +98,15 @@ class ImageLibrary:
         for path in self.root.glob("*/meta.json"):
             if not IMAGE_ID.fullmatch(path.parent.name):
                 continue
-            meta = json.loads(path.read_text())
+            try:
+                meta = json.loads(path.read_text())
+            except ValueError:
+                continue  # Tom fil efter strömavbrott: hoppa över bilden i stället för att stoppa listan.
             annotation = path.parent / "annotation.json"
-            if annotation.is_file():
+            try:
                 document = json.loads(annotation.read_text())
                 meta.update(annotated=True, boxes=len(document["boxes"]), annotated_by=document["editor"])
-            else:
+            except (OSError, ValueError):
                 meta.update(annotated=False, boxes=0)
             rows.append(meta)
         return sorted(rows, key=lambda row: row["created"], reverse=True)
@@ -142,6 +146,8 @@ class ImageLibrary:
                 "editor": editor, "source": origin, "thermal": heat,
             })
             staging.rename(self.root / image_id)
+            # Skriv till SD-kortet direkt, så att ett strömavbrott inte lämnar tomma filer.
+            os.sync()
         except StoreError:
             shutil.rmtree(staging, ignore_errors=True)
             raise
@@ -209,6 +215,7 @@ class ImageLibrary:
         with self.lock:
             write_json(self.folder(image_id) / "annotation.json", document)
             self.build_dataset()
+            os.sync()
         return document
 
     def delete(self, image_id):
